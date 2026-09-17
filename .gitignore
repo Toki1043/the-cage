@@ -39,3 +39,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Roborze i wersje alternatywne grafik z modelu obrazkowego: ciezkie
+# i regenerowalne przez scripts/generate-art.ts.
+public/arena/*.png
+# Dwie warstwy sedziego sa wyjatkiem: referee-svg.ts wciaga je jako <image>
+# w czasie dzialania, wiec bez nich deploy z gita ma ring bez sedziego.
+!public/arena/sahur.png
+!public/arena/club.png

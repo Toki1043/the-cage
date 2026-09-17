@@ -1,4 +1,5 @@
-/*
+<!doctype html><meta charset=utf-8><title>Arena preview</title>
+<style>/*
  * Arkusz przeniesiony z prototyp-front.html bez zmian w regułach — wygląd
  * ma zostać ten sam. Jedyna różnica: rodziny fontów wchodzą przez zmienne
  * `--font-anton` i `--font-archivo`, bo next/font hashuje nazwy (patrz
@@ -177,26 +178,6 @@
   td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
   .empty{color:var(--ink-soft);font-size:.9rem;border:1px dashed var(--rule);padding:1rem}
   .scroller{overflow-x:auto}
-
-  /* Drabina: pięć list obok siebie, po jednej na kategorię wagową.
-     Na wąskim ekranie schodzą pod siebie — kolumny nie mieszczą się na telefonie. */
-  #ladder{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:.75rem}
-  .board{border:1px solid var(--rule);background:var(--card);padding:.7rem .8rem}
-  .board h4{margin:0 0 .5rem;font-size:.75rem;text-transform:uppercase;letter-spacing:.06em;
-    font-weight:600;display:flex;justify-content:space-between;gap:.5rem;align-items:baseline;
-    border-bottom:1px solid var(--rule);padding-bottom:.4rem}
-  .board h4 .cnt{color:var(--ink-soft);font-weight:400;font-variant-numeric:tabular-nums}
-  .board ol{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:.35rem}
-  .board li{display:grid;grid-template-columns:1.2rem 1fr auto auto;gap:.4rem;align-items:baseline;
-    font-size:.85rem}
-  .board .rank{color:var(--ink-soft);font-variant-numeric:tabular-nums}
-  .board .tick{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .board .rec,.board .pts{font-variant-numeric:tabular-nums;color:var(--ink-soft)}
-  .board .pts{font-weight:600;color:var(--ink)}
-  /* Przypisy pod wierszem: nokauty i walki poza kategorią. */
-  .board .ko,.board .up{grid-column:2/-1;font-size:.7rem;color:var(--ink-soft)}
-  .board .up{color:var(--gold)}
-  .none{color:var(--ink-soft);font-size:.8rem;margin:0}
   footer{margin-top:3rem;border-top:1px solid var(--rule);padding-top:1rem;color:var(--ink-soft);
     font-size:.8rem;display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap}
   /* ---------- dopisane przy przenoszeniu na Next.js ---------- */
@@ -316,7 +297,7 @@
     background:var(--canvas);border-color:var(--rule);color:var(--ink)}
 
   /* Hala: obraz wygenerowany przez google/gemini-3-pro-image, prompt i
-     wywołanie w scripts/generate-art.ts. To jedyny element wizualny,
+     wywołanie w scripts/generate-backdrop.ts. To jedyny element wizualny,
      który wolno wygenerować jako obrazek — jest statyczny i nie musi się
      ruszać. Zawodnicy i sędzia zostają rysowani proceduralnie, bo oni się
      ruszają (CLAUDE.md § Sędzia).
@@ -330,7 +311,7 @@
   .ring .backdrop{position:absolute;inset:-.5rem 0 0;z-index:0;pointer-events:none;
     opacity:0;transition:opacity .9s ease;
     background-image:radial-gradient(112% 86% at 50% 42%, transparent 40%, rgba(0,0,0,.62) 100%),
-      url('/arena/hall.jpg');
+      url('public/arena/hall.jpg');
     background-size:cover,cover;background-position:center,center 42%;
     background-repeat:no-repeat,no-repeat}
   .arena.lights-down .ring .backdrop{opacity:1}
@@ -360,3 +341,67 @@
     .ring .backdrop{transition:none}
     .fighter,.referee .ref-fig{animation:none}
   }
+
+  body{padding:1.5rem}
+  .bar{display:flex;gap:.4rem;justify-content:center;margin:0 auto 1.25rem;flex-wrap:wrap;max-width:60rem}
+  .bar button{font:inherit;font-size:.82rem;padding:.35rem .7rem;border:1px solid var(--rule);
+    background:var(--card);color:var(--ink);cursor:pointer}
+  .bar button.hot{border-color:var(--gold);color:var(--gold)}
+</style>
+<div class=wrap>
+<div class=bar>
+  <button id=lights class=hot>switch lights</button>
+  <button data-c=talking>instructions</button>
+  <button data-c=gong-hit>gong</button>
+  <button data-c=counting>counting</button>
+  <button data-c=waving>wave-off</button>
+  <button data-c=judging>judges</button>
+  <button data-c=''>reset ref</button>
+</div>
+<section class=corners>
+  <div class='corner a'><h2><span>Red corner</span><span class=weight>Middleweight</span></h2>
+    <label class=field><span>Contract address</span><input value='0x2e8c31162b855a2ffa90f6f8634643ad6f111e18'></label>
+    <div class=readout><div class=tick>$AI</div>
+      <dl><div><dt>Market cap</dt><dd>$273.4M</dd></div><div><dt>Liquidity</dt><dd>$2.1M</dd></div>
+      <div><dt>Holders</dt><dd>46,755</dd></div><div><dt>Pair age</dt><dd>56d</dd></div></dl>
+      <p class=hint>Read from the chain, not typed. Snapshot taken when the bell rings.</p></div></div>
+  <div class='corner b'><h2><span>Blue corner</span><span class=weight>Heavyweight</span></h2>
+    <label class=field><span>Contract address</span><input value='0x0bd7d308f8e1639fab988df18a8011f41eacad73'></label>
+    <div class=readout><div class=tick>$WETH</div>
+      <dl><div><dt>Market cap</dt><dd>$110M</dd></div><div><dt>Liquidity</dt><dd>$31M</dd></div>
+      <div><dt>Holders</dt><dd>4,102</dd></div><div><dt>Pair age</dt><dd>640d</dd></div></dl>
+      <p class=hint>Read from the chain, not typed. Snapshot taken when the bell rings.</p></div></div>
+</section>
+<section class='arena lights-down' id=arena>
+  <div class=scoreboard>
+    <div class='sb a'><div class=nm>$AI</div><div class=meta>46,755 holders · 56d · middleweight</div>
+      <div class=hpbar><i style='width:72%'></i></div></div>
+    <div class=roundtag>Round 2 of 3</div>
+    <div class='sb b'><div class=nm>$WETH</div><div class=meta>4,102 holders · 640d · heavyweight</div>
+      <div class=hpbar><i style='width:88%'></i></div></div>
+  </div>
+  <div class=ring>
+    <div class=backdrop></div>
+    <div class=ropes><span></span><span></span><span></span></div>
+    <div class=stage>
+      <div class=floor></div>
+      <div class=referee id=ref><svg viewBox="0 0 120 176" role="img" aria-label="Referee"><g class="gong-rig"><rect x="116" y="70" width="3" height="94" rx="1.5" fill="var(--rule)"/><rect x="110" y="162" width="10" height="3.5" rx="1.7" fill="var(--rule)"/><rect x="103" y="70" width="16" height="3" rx="1.5" fill="var(--rule)"/><path d="M105 73 L102 112 M117 73 L110 112" stroke="var(--rule)" stroke-width="1.2" fill="none"/></g><g class="gong"><circle cx="106" cy="122" r="10" fill="var(--gold)" opacity=".92"/><circle cx="106" cy="122" r="6.2" fill="none" stroke="var(--ink)" stroke-width="1" opacity=".22"/><circle cx="106" cy="122" r="2.2" fill="var(--ink)" opacity=".3"/></g><g class="ref-sway"><g class="ref-fig"><image href="public/arena/sahur.png" x="-11.4" y="66" width="111.1" height="111.1" preserveAspectRatio="xMidYMid meet"/><g class="club"><image href="public/arena/club.png" x="63.075300000000006" y="100.34979999999999" width="47.9" height="47.9" preserveAspectRatio="xMidYMid meet"/></g></g></g></svg></div>
+      <div class='fighter a'><svg viewBox="0 0 120 176" role="img" aria-label="AI"><g class="fig"><path d="M46.5344 126 L36.855999999999995 168 L57.896 168 L58 126 Z" fill="var(--red)" opacity=".85"/><path d="M62.104 126 L67.5744 168 L86.08959999999999 168 L77.6736 126 Z" fill="var(--red)" opacity=".85"/><rect x="33.9104" y="163" width="26.089599999999997" height="7" rx="2" fill="var(--ink)"/><rect x="65.0496" y="163" width="24.406399999999998" height="7" rx="2" fill="var(--ink)"/><path d="M38.96 108 L81.03999999999999 108 L83.5648 132 L62.5248 128 L38.96 132 Z" fill="var(--ink)"/><rect x="38.96" y="106" width="42.08" height="5" fill="var(--red)"/><path d="M41.4848 60 Q60 54 78.5152 60 L81.88159999999999 110 L38.1184 110 Z" fill="var(--red)"/><g class="arm-rear"><rect x="54" y="78" width="22" height="11" rx="5" fill="var(--red)" opacity=".75"/><circle cx="82" cy="82" r="11.6875" fill="var(--gold)"/></g><g class="head"><circle cx="60" cy="52" r="19" fill="var(--red)"/><rect x="53" y="66" width="14" height="8" fill="var(--red)"/><rect class="brow" x="63" y="46" width="14" height="3.5" rx="1.7" fill="var(--ink)"/><circle cx="69" cy="54" r="2.2" fill="var(--ink)"/><rect x="66" y="61" width="9" height="2.4" rx="1.2" fill="var(--ink)" opacity=".8"/></g><g class="arm-lead"><rect x="62" y="72" width="26" height="12" rx="6" fill="var(--red)"/><circle cx="92" cy="78" r="13.75" fill="var(--gold)"/><circle cx="92" cy="78" r="6.1875" fill="var(--ink)" opacity=".18"/></g></g></svg></div>
+      <div class='fighter b'><svg viewBox="0 0 120 176" role="img" aria-label="WETH"><g class="fig"><path d="M44.3072 126 L33.028 168 L57.548 168 L58 126 Z" fill="var(--blue)" opacity=".85"/><path d="M62.452 126 L68.8272 168 L90.4048 168 L80.5968 126 Z" fill="var(--blue)" opacity=".85"/><rect x="29.595200000000002" y="163" width="30.404799999999998" height="7" rx="2" fill="var(--ink)"/><rect x="65.8848" y="163" width="28.443199999999997" height="7" rx="2" fill="var(--ink)"/><path d="M35.480000000000004 108 L84.52 108 L87.4624 132 L62.9424 128 L35.480000000000004 132 Z" fill="var(--ink)"/><rect x="35.480000000000004" y="106" width="49.04" height="5" fill="var(--blue)"/><path d="M38.422399999999996 60 Q60 54 81.5776 60 L85.5008 110 L34.4992 110 Z" fill="var(--blue)"/><g class="arm-rear"><rect x="54" y="78" width="22" height="11" rx="5" fill="var(--blue)" opacity=".75"/><circle cx="82" cy="82" r="8.6275" fill="var(--gold)"/></g><g class="head"><circle cx="60" cy="52" r="19" fill="var(--blue)"/><rect x="53" y="66" width="14" height="8" fill="var(--blue)"/><rect class="brow" x="63" y="46" width="14" height="3.5" rx="1.7" fill="var(--ink)"/><circle cx="69" cy="54" r="2.2" fill="var(--ink)"/><rect x="66" y="61" width="9" height="2.4" rx="1.2" fill="var(--ink)" opacity=".8"/><path d="M56 62 Q68 78 77 60 Q68 70 56 62 Z" fill="var(--ink)" opacity=".55"/></g><g class="arm-lead"><rect x="62" y="72" width="26" height="12" rx="6" fill="var(--blue)"/><circle cx="92" cy="78" r="10.15" fill="var(--gold)"/><circle cx="92" cy="78" r="4.5675" fill="var(--ink)" opacity=".18"/></g></g></svg></div>
+    </div>
+  </div>
+  <div class=calls>
+    <p class=ref>Down goes $AI. The referee picks up the count. 1 … 2 … 3</p>
+    <p>The liquidity gap is doing the work here.</p>
+    <p class=col>Thin book, heavy hands.</p>
+  </div>
+</section>
+</div>
+<script>
+const host = document.getElementById('ref'), arena = document.getElementById('arena')
+document.getElementById('lights').onclick = () => arena.classList.toggle('lights-down')
+for (const btn of document.querySelectorAll('.bar button[data-c]')) {
+  btn.onclick = () => { host.className = 'referee'; void host.offsetWidth
+    if (btn.dataset.c) host.classList.add(btn.dataset.c) }
+}
+</script>

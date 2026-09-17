@@ -6,10 +6,16 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "verify:stats": "node --experimental-strip-types --no-warnings scripts/verify-stats.ts",
+    "verify:determinism": "node --experimental-strip-types --no-warnings scripts/verify-determinism.ts",
+    "verify:fight": "node --experimental-strip-types --no-warnings scripts/verify-fight.ts",
+    "verify": "npm run verify:stats && npm run verify:fight && npm run verify:leaderboard",
+    "verify:leaderboard": "node --experimental-strip-types --no-warnings scripts/verify-leaderboard.ts"
   },
   "dependencies": {
     "next": "16.3.5",
+    "openai": "^7.16.0",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
