@@ -250,9 +250,28 @@ function userPrompt(sheet: string, roundCount: number): string {
 const PICTOGRAPHS =
   /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2190}-\u{21FF}\u{2B00}-\u{2BFF}\u{FE0F}\u{20E3}\u{2122}\u{2139}]/gu
 
+/**
+ * Ucina do `max` znaków, ale nie w pół słowa: jeśli tekst jest za długi,
+ * cofa się do końca ostatniego pełnego zdania w limicie, a gdy takiego nie
+ * ma — do ostatniej spacji. Bez tego długa odpowiedź modelu urywała się
+ * dokładnie na granicy znaków, czasem w połowie słowa.
+ */
 function tidy(value: unknown, max: number): string {
   if (typeof value !== 'string') return ''
-  return value.replace(PICTOGRAPHS, '').replace(/\s+/g, ' ').trim().slice(0, max)
+  const text = value.replace(PICTOGRAPHS, '').replace(/\s+/g, ' ').trim()
+  if (text.length <= max) return text
+
+  const cut = text.slice(0, max)
+  const lastSentenceEnd = Math.max(
+    cut.lastIndexOf('. '),
+    cut.lastIndexOf('! '),
+    cut.lastIndexOf('? '),
+    cut.endsWith('.') || cut.endsWith('!') || cut.endsWith('?') ? cut.length - 1 : -1,
+  )
+  if (lastSentenceEnd > 0) return cut.slice(0, lastSentenceEnd + 1)
+
+  const lastSpace = cut.lastIndexOf(' ')
+  return lastSpace > 0 ? cut.slice(0, lastSpace) : cut
 }
 
 /**
@@ -307,7 +326,7 @@ export async function POST(request: NextRequest) {
     const completion = await openrouter.chat.completions.create({
       model: DEFAULT_MODEL,
       temperature: 0.8,
-      max_tokens: 900,
+      max_tokens: 2000,
       messages: [
         { role: 'system', content: SYSTEM },
         { role: 'user', content: userPrompt(fightSheet(a, b, rounds), rounds.length) },

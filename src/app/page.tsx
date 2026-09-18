@@ -235,23 +235,33 @@ async function fetchCommentary(data: FightApiResponse): Promise<CommentaryLine[]
 /* Tale of the tape                                                    */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Tale of the tape jako dwie osobne karty zamiast jednego paska porównania —
+ * czerwona karta po lewej, niebieska po prawej (nowy układ areny).
+ */
 function drawTape(a: TokenFightData, b: TokenFightData) {
-  need('tape').hidden = false
-  need('stats').innerHTML = STAT_ROWS.map(([key, label]) => {
-    const av = a.stats[key]
-    const bv = b.stats[key]
-    return (
-      `<div class="stat"><div class="bar l"><i style="width:${av}%"></i><b>${av}</b></div>` +
-      `<div class="lbl">${label}</div>` +
-      `<div class="bar r"><i style="width:${bv}%"></i><b>${bv}</b></div></div>`
-    )
-  }).join('')
+  const rows = (token: TokenFightData) =>
+    STAT_ROWS.map(([key, label]) => {
+      const v = token.stats[key]
+      return (
+        `<div class="stat-row"><span class="stat-lbl">${label}</span>` +
+        `<div class="stat-bar"><i style="width:${v}%"></i></div>` +
+        `<span class="stat-val">${v}</span></div>`
+      )
+    }).join('')
+  need('stats-a').innerHTML = rows(a)
+  need('stats-b').innerHTML = rows(b)
 }
 
 /* ------------------------------------------------------------------ */
 /* Ringside read — czysta arytmetyka, bez modelu                        */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Ringside read jako dwie osobne pływające karty (czerwona po lewej,
+ * niebieska po prawej) plus jedna wspólna linijka porównania w panelu
+ * sędziego na dole — zamiast jednego bloku pod areną.
+ */
 function drawRead(a: TokenFightData, b: TokenFightData) {
   const reads = [a, b].map((token) =>
     ringsideRead({
@@ -262,37 +272,38 @@ function drawRead(a: TokenFightData, b: TokenFightData) {
   )
   const [ra, rb] = reads
 
-  const card = (token: TokenFightData, read: typeof ra, side: Side) =>
-    `<div class="rcard${side === 'b' ? ' b' : ''}"><h4>$${tick(token.symbol)}</h4><dl>` +
-    `<dt>Sell before −10%</dt><dd>about ${usd(read.exitUsd)}</dd>` +
-    `<dt>Paper per $1 of exit</dt><dd>$${count(read.paperPerDollar)}</dd>` +
-    `<dt>Liquidity</dt><dd>${usd(token.snapshot.liquidityUsd)}</dd>` +
-    `<dt>Market cap</dt><dd>${usd(token.snapshot.marketCapUsd)}</dd>` +
-    `<dt>Pair age</dt><dd>${count(token.snapshot.pairAgeDays)}d</dd>` +
-    `</dl><p class="say">${read.say}</p></div>`
+  const fill = (side: Side, token: TokenFightData, read: typeof ra) => {
+    const box = need(`read-card-${side}`)
+    box.innerHTML =
+      '<h4>Ringside read</h4><dl>' +
+      `<dt>Sell before −10%</dt><dd>about ${usd(read.exitUsd)}</dd>` +
+      `<dt>Paper per $1 of exit</dt><dd>$${count(read.paperPerDollar)}</dd>` +
+      `<dt>Liquidity</dt><dd>${usd(token.snapshot.liquidityUsd)}</dd>` +
+      `<dt>Market cap</dt><dd>${usd(token.snapshot.marketCapUsd)}</dd>` +
+      `<dt>Pair age</dt><dd>${count(token.snapshot.pairAgeDays)}d</dd>` +
+      `</dl><p class="say">${read.say}</p>`
+    box.hidden = false
+  }
+  fill('a', a, ra)
+  fill('b', b, rb)
 
   const thinner = ra.exitUsd < rb.exitUsd ? a : b
   const wider = thinner === a ? b : a
   const wide = Math.max(ra.exitUsd, rb.exitUsd)
   const thin = Math.min(ra.exitUsd, rb.exitUsd)
-  const headline =
-    `You can move about ${usd(wide)} out of $${tick(wider.symbol)} before the price drops 10%, ` +
-    `and only about ${usd(thin)} out of $${tick(thinner.symbol)} — ` +
-    `roughly a ${count(wide / Math.max(1, thin))}× difference in how easily you get your money back.`
+  const ratio = wide / Math.max(1, thin)
 
-  const box = document.createElement('div')
-  box.className = 'read'
-  box.innerHTML =
-    '<h3>Ringside read</h3>' +
-    '<p class="why">The same numbers the fight runs on, in dollars. No model touches this part. ' +
-    'The exit figure assumes a constant-product pool; where liquidity is concentrated (Uniswap v3/v4) ' +
-    'the real number lands either side of it, so read it as an order of magnitude, not a quote.</p>' +
-    `<div class="reads">${card(a, ra, 'a')}${card(b, rb, 'b')}</div>` +
-    `<p class="headline">${headline}</p>`
-
-  const host = need('read-host')
-  host.textContent = ''
-  host.appendChild(box)
+  const headline = need('read-headline')
+  // Sub-1.2x is noise, not a real gap — a "1x difference" reads as a claim
+  // that one side is worse, when the exit costs the same either way.
+  headline.textContent =
+    ratio < 1.2
+      ? `Exiting either token costs about the same before the price drops 10%: roughly ${usd(wide)} ` +
+        `out of $${tick(wider.symbol)} and ${usd(thin)} out of $${tick(thinner.symbol)}.`
+      : `You can move about ${usd(wide)} out of $${tick(wider.symbol)} before the price drops 10%, ` +
+        `and only about ${usd(thin)} out of $${tick(thinner.symbol)} — ` +
+        `roughly a ${count(ratio)}× difference in how easily you get your money back.`
+  headline.hidden = false
 }
 
 /* ------------------------------------------------------------------ */
@@ -493,7 +504,13 @@ function createRing(data: FightApiResponse, clock: Clock) {
     // Światła gasną. Wejście zostaje kremowym plakatem, walka idzie w ciemnej
     // hali — klasa podmienia zmienne areny, patrz globals.css § światła gasną.
     arena.classList.add('lights-down')
-    need('read-host').textContent = ''
+    // Karty ringside read i werdykt należą do poprzedniej walki — nowa walka
+    // chowa je z powrotem, aż drawRead/drawVerdict wypełnią je na nowo.
+    need('read-card-a').hidden = true
+    need('read-card-a').innerHTML = ''
+    need('read-card-b').hidden = true
+    need('read-card-b').innerHTML = ''
+    need('read-headline').hidden = true
     need('verdict-host').textContent = ''
     need('kostamp').hidden = true
 
@@ -645,6 +662,7 @@ function fillCorner(side: Side, token: TokenFightData) {
   need(`${side}-holders`).textContent = count(token.snapshot.holders)
   need(`${side}-age`).textContent = `${count(token.snapshot.pairAgeDays)}d`
   need(`${side}-weight`).textContent = WEIGHT_LABELS[token.weightClass.id]
+  need(`tape-card-${side}`).hidden = false
 }
 
 /**
@@ -805,6 +823,18 @@ export default function Home() {
     need('skip').hidden = true
   }
 
+  /**
+   * Ranking żyje w chowanej szufladzie z boku ekranu, żeby arena sama w sobie
+   * została pełnoekranowa i bez przewijania strony.
+   */
+  function toggleLadder() {
+    const drawer = need('ladder-drawer')
+    const open = drawer.classList.toggle('open')
+    const tab = need('ladder-tab')
+    tab.setAttribute('aria-expanded', String(open))
+    tab.textContent = open ? 'CLOSE ✕' : 'RANKING ▤'
+  }
+
   async function go() {
     if (busy.current) return
 
@@ -851,7 +881,6 @@ export default function Home() {
 
       const ring = createRing(data, clock.current)
       ring.reset()
-      need('arena').scrollIntoView({ behavior: 'smooth', block: 'center' })
 
       // Komentarz przed pierwszym gongiem: kwestie z rundy pierwszej muszą
       // być gotowe, zanim ruszy animacja. Walka i tak się odbędzie, jeśli
@@ -867,9 +896,11 @@ export default function Home() {
       need('skip').hidden = true
 
       need('roundtag').textContent = 'Final'
+      // Kwestia ostatniej rundy zrobiła swoje — zostawiona, spychała werdykt
+      // (puentę całej walki) tak nisko, że panel sędziego zasłaniał ring.
+      need('calls').innerHTML = ''
       drawRead(data.tokenA, data.tokenB)
       drawVerdict(data)
-      need('verdict-host').scrollIntoView({ behavior: 'smooth', block: 'center' })
 
       // Wynik jest już zapisany po stronie serwera — tu tylko przeciągamy
       // odświeżoną listę. Zapis jest idempotentny po parze adresów, więc
@@ -885,93 +916,128 @@ export default function Home() {
   }
 
   return (
-    <div className="wrap">
-      <header className="poster">
-        <div className="venue">Sanctioned by nobody · No commission recognises this</div>
-        <h1>
-          Red corner<span className="v">versus</span>Blue corner
-        </h1>
-        <p>
-          Two contracts, four stats each, three rounds. The numbers decide who wins — the
-          commentary team just has to watch it happen.
+    <div className="cage">
+      <div className="cage-bg" aria-hidden />
+
+      {/* Pasek terminala na górze ekranu — jedyne miejsce do wpisania czegoś.
+          Bez osobnego ekranu startowego: to samo wejście leży na tle areny.
+          `.topbar` jest jedynym elementem tu pozycjonowanym `absolute` —
+          pasek i komunikaty pod nim płyną normalnie jeden pod drugim w jego
+          wnętrzu. Wcześniej `.termbar` był `position:absolute` SAM, więc jego
+          rodzeństwo (status/crossclass/tracked-note) nie miało czego się
+          trzymać w przepływie i renderowało się na tej samej wysokości co
+          pasek, pod spodem — tylko z-index ratował klikalność przycisku. */}
+      <div className="topbar">
+        <header className="termbar">
+          <div className="term-field red">
+            <label htmlFor="a-addr">RED_CONTRACT</label>
+            <input id="a-addr" autoComplete="off" spellCheck={false} placeholder="0x…" />
+          </div>
+          <div className="term-actions">
+            <button className="chip" type="button" onClick={loadSample}>
+              sample
+            </button>
+            <button className="term-go" id="go" type="button" onClick={go}>
+              Make the fight
+            </button>
+          </div>
+          <div className="term-field blue">
+            <label htmlFor="b-addr">BLUE_CONTRACT</label>
+            <input id="b-addr" autoComplete="off" spellCheck={false} placeholder="0x…" />
+          </div>
+        </header>
+
+        <p className="status" id="status">
+          Both corners fill themselves from the chain. Paste two contract addresses.
         </p>
-      </header>
-
-      <section className="corners">
-        <Corner side="a" title="Red corner" />
-        <Corner side="b" title="Blue corner" />
-      </section>
-
-      <div className="controls">
-        <button className="chip" type="button" onClick={loadSample}>
-          Load a real undercard
-        </button>
-        <button className="main" id="go" type="button" onClick={go}>
-          Make the fight
-        </button>
+        <p className="crossclass" id="crossclass" hidden />
+        {/* Jedno zdanie pod oba narożniki, a nie po jednym w każdym: ta sama
+            uwaga powtórzona dwa razy czyta się jak ostrzeżenie o czymś innym. */}
+        <p className="tracked-note" id="tracked-note" hidden />
       </div>
-      <p className="status" id="status">
-        Both corners fill themselves from the chain. Paste two contract addresses.
-      </p>
-      <p className="crossclass" id="crossclass" hidden />
-      {/* Jedno zdanie pod oba narożniki, a nie po jednym w każdym: ta sama
-          uwaga powtórzona dwa razy czyta się jak ostrzeżenie o czymś innym. */}
-      <p className="tracked-note" id="tracked-note" hidden />
 
-      <section className="arena" id="arena" hidden>
-        <div className="scoreboard">
-          <div className="sb a">
-            <div className="nm" id="f-a-tick" />
-            <div className="meta" id="f-a-meta" />
-            <div className="hpbar">
-              <i id="f-a-hp" />
+      <main className="stage-floor">
+        <section className="arena" id="arena" hidden>
+          <div className="scoreboard">
+            <div className="sb a">
+              <div className="nm" id="f-a-tick" />
+              <div className="meta" id="f-a-meta" />
+              <div className="hpbar">
+                <i id="f-a-hp" />
+              </div>
+            </div>
+            <div className="roundtag" id="roundtag" />
+            <div className="sb b">
+              <div className="nm" id="f-b-tick" />
+              <div className="meta" id="f-b-meta" />
+              <div className="hpbar">
+                <i id="f-b-hp" />
+              </div>
             </div>
           </div>
-          <div className="roundtag" id="roundtag" />
-          <div className="sb b">
-            <div className="nm" id="f-b-tick" />
-            <div className="meta" id="f-b-meta" />
-            <div className="hpbar">
-              <i id="f-b-hp" />
+          {/* Nad ringiem, nie pod nim: panel sędziego jest zakotwiczony od
+              dołu ekranu i rośnie w górę wraz z treścią, więc dolna krawędź
+              areny bywa przez niego zasłonięta. Tutaj przycisk zawsze zostaje
+              klikalny. */}
+          <div className="bottom">
+            <span className="status" id="arena-status" style={{ margin: 0, textAlign: 'left' }} />
+            <button id="skip" type="button" onClick={onSkip} hidden>
+              Skip to result
+            </button>
+          </div>
+          <div className="ring">
+            <div className="backdrop" />
+            <div className="ropes">
+              <span />
+              <span />
+              <span />
+            </div>
+            <div className="stage">
+              <div className="floor" />
+              <div className="fighter a" id="f-a" />
+              <div className="fighter b" id="f-b" />
+              <div className="referee" id="ref-fig" />
+            </div>
+            <div className="flash" id="flash" />
+            <div className="kostamp" id="kostamp" hidden>
+              <b id="kotext">KO</b>
             </div>
           </div>
-        </div>
-        <div className="ring">
-          <div className="backdrop" />
-          <div className="ropes">
-            <span />
-            <span />
-            <span />
-          </div>
-          <div className="stage">
-            <div className="floor" />
-            <div className="fighter a" id="f-a" />
-            <div className="fighter b" id="f-b" />
-            <div className="referee" id="ref-fig" />
-          </div>
-          <div className="flash" id="flash" />
-          <div className="kostamp" id="kostamp" hidden>
-            <b id="kotext">KO</b>
-          </div>
-        </div>
+        </section>
+      </main>
+
+      {/* Karty na tle areny: czerwony zawodnik po lewej, niebieski po prawej.
+          Zaczynają schowane i wchodzą w trakcie walki, nie wszystkie naraz —
+          fillCorner/drawTape/drawRead je odsłaniają po kolei. */}
+      <div className="side-stack left">
+        <CornerCard side="a" />
+        <div className="float-card red read-card" id="read-card-a" hidden />
+      </div>
+      <div className="side-stack right">
+        <CornerCard side="b" />
+        <div className="float-card blue read-card" id="read-card-b" hidden />
+      </div>
+
+      {/* Sędzia: kwestie w trakcie walki i werdykt na końcu, w tej samej
+          karcie na dole środkiem (CLAUDE.md § Sędzia — ogłasza, nie decyduje). */}
+      <div className="judge-panel" id="judge-panel">
         <div className="calls" id="calls" />
-        <div className="bottom">
-          <span className="status" id="arena-status" style={{ margin: 0, textAlign: 'left' }} />
-          <button id="skip" type="button" onClick={onSkip} hidden>
-            Skip to result
-          </button>
-        </div>
-      </section>
+        <p className="read-headline" id="read-headline" hidden />
+        <div id="verdict-host" />
+        <p className="note-line" id="note" />
+      </div>
 
-      <section className="tape" id="tape" hidden>
-        <h3>Tale of the tape</h3>
-        <div id="stats" />
-      </section>
-
-      <section id="read-host" />
-      <section id="verdict-host" />
-
-      <section className="ladder">
+      <button
+        className="ladder-tab"
+        id="ladder-tab"
+        type="button"
+        aria-expanded="false"
+        aria-controls="ladder-drawer"
+        onClick={toggleLadder}
+      >
+        RANKING ▤
+      </button>
+      <aside className="ladder-drawer" id="ladder-drawer">
         <h3>The ladder</h3>
         <p className="sub">
           One list per weight class, per contract rather than per fight. A contract carries its
@@ -982,64 +1048,52 @@ export default function Home() {
           <p className="none">Loading the ladder…</p>
         </div>
         <p className="sub" id="ladder-note" />
-      </section>
-
-      <footer>
-        <span>Entertainment. A token that wins a fight is still a token.</span>
-        <span id="note" />
-      </footer>
+        <footer>
+          <span>Entertainment. A token that wins a fight is still a token.</span>
+        </footer>
+      </aside>
     </div>
   )
 }
 
 /**
- * Narożnik. Adres jest jedynym polem do wpisania — i jedynym, które wygląda
- * jak pole.
- *
- * Reszta liczb przychodzi z `/api/fight`, więc jest odczytem, nie formularzem.
- * Wcześniej stały tu inputy z `readOnly`: pole, w które nie da się pisać,
- * czyta się jak zepsuty formularz, a nie jak dane.
+ * Karta narożnika: ticker, kategoria wagowa, odczyt z łańcucha i tale of the
+ * tape tego zawodnika. Adresu tu już nie ma — wpisuje się go w pasku
+ * terminala na górze, to jest już tylko odczyt z `/api/fight`.
  */
-function Corner({ side, title }: { side: Side; title: string }) {
+function CornerCard({ side }: { side: Side }) {
   return (
-    <div className={`corner ${side}`}>
-      <h2>
-        <span>{title}</span>
+    <div className={`float-card ${side === 'a' ? 'red' : 'blue'} tape-card`} id={`tape-card-${side}`} hidden>
+      <h4>
+        <span className="tick" id={`${side}-ticker`} />
         <span className="weight" id={`${side}-weight`} />
-      </h2>
-      <label className="field">
-        <span>Contract address</span>
-        <input id={`${side}-addr`} autoComplete="off" spellCheck={false} placeholder="0x…" />
-      </label>
-      <div className="readout">
-        <div className="tick" id={`${side}-ticker`} />
-        <dl>
-          <div>
-            <dt>Market cap</dt>
-            <dd id={`${side}-mcap`}>—</dd>
-          </div>
-          <div>
-            <dt>Liquidity</dt>
-            <dd id={`${side}-liq`}>—</dd>
-          </div>
-          <div>
-            <dt>Holders</dt>
-            <dd id={`${side}-holders`}>—</dd>
-          </div>
-          <div>
-            <dt>Pair age</dt>
-            <dd id={`${side}-age`}>—</dd>
-          </div>
-          {/* Wiersz na całą szerokość i domyślnie schowany: bez listy
-              obserwowanych portfeli po stronie serwera nie ma tu czego
-              pokazać, a puste pole czyta się jak zero trafień. */}
-          <div className="wide" id={`${side}-tracked-row`} hidden>
-            <dt>Watched wallets</dt>
-            <dd id={`${side}-tracked`}>—</dd>
-          </div>
-        </dl>
-        <p className="hint">Read from the chain, not typed. Snapshot taken when the bell rings.</p>
-      </div>
+      </h4>
+      <dl>
+        <div>
+          <dt>Market cap</dt>
+          <dd id={`${side}-mcap`}>—</dd>
+        </div>
+        <div>
+          <dt>Liquidity</dt>
+          <dd id={`${side}-liq`}>—</dd>
+        </div>
+        <div>
+          <dt>Holders</dt>
+          <dd id={`${side}-holders`}>—</dd>
+        </div>
+        <div>
+          <dt>Pair age</dt>
+          <dd id={`${side}-age`}>—</dd>
+        </div>
+        {/* Wiersz na całą szerokość i domyślnie schowany: bez listy
+            obserwowanych portfeli po stronie serwera nie ma tu czego
+            pokazać, a puste pole czyta się jak zero trafień. */}
+        <div className="wide" id={`${side}-tracked-row`} hidden>
+          <dt>Watched wallets</dt>
+          <dd id={`${side}-tracked`}>—</dd>
+        </div>
+      </dl>
+      <div className="stat-rows" id={`stats-${side}`} />
     </div>
   )
 }

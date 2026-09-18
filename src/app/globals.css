@@ -1,12 +1,20 @@
 /*
- * Arkusz przeniesiony z prototyp-front.html bez zmian w regułach — wygląd
- * ma zostać ten sam. Jedyna różnica: rodziny fontów wchodzą przez zmienne
- * `--font-anton` i `--font-archivo`, bo next/font hashuje nazwy (patrz
- * layout.tsx), a prototyp ładował je <link>-iem z Google Fonts.
+ * Układ przebudowany na pełnoekranową arenę w stylu retro-terminalowym.
  *
- * Na końcu pliku dopisane reguły dla rzeczy, których prototyp nie miał:
- * pola tylko do odczytu (dane ciągnie backend, nie użytkownik), kategoria
- * wagowa i kwestie sędziego.
+ * Ring z zawodnikami (`.ring`, `.stage`, `.fighter`, `.referee` i wszystkie
+ * ich animacje/klawisze) zostały PRZEPISANE BEZ ZMIAN z poprzedniej wersji —
+ * ten sam rozmiar, ta sama animacja, bo tak brzmiało zlecenie. Zmieniło się
+ * tylko to, co je otacza: zamiast strony przewijanej od plakatu w dół przez
+ * narożniki, ring i panele pod spodem, całość stoi teraz w jednym stałym
+ * viewporcie (`.cage`), a dane, które kiedyś leżały pod areną (tale of the
+ * tape, ringside read, kwestie sędziego, werdykt), pływają nad tłem jako
+ * półprzezroczyste karty — czerwone po lewej, niebieskie po prawej, sędzia
+ * na dole środkiem.
+ *
+ * Rodziny fontów wchodzą przez zmienne `--font-anton` i `--font-archivo`,
+ * bo next/font hashuje nazwy (patrz layout.tsx). Dochodzi `--font-term`:
+ * zwykły monospace na tekst kart, żeby całość czytała się jak terminal,
+ * a nie jak strona z pixelowym nagłówkiem i resztą w sans-serif.
  */
 
   @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
@@ -19,6 +27,7 @@
     --red-wash:rgba(255,46,99,.14); --blue-wash:rgba(34,211,255,.14);
     --neon-green:#39FF6A;
     --font-pixel:'Press Start 2P',monospace;
+    --font-term:ui-monospace,SFMono-Regular,Menlo,Consolas,'Liberation Mono',monospace;
   }
   @media (prefers-color-scheme: dark){
     :root:not([data-theme="light"]){
@@ -38,13 +47,13 @@
       --neon-green:#39FF6A;
   }
   *{box-sizing:border-box}
-  html,body{margin:0}
-  body{background-color:var(--bg);color:var(--ink);font-family:var(--font-archivo),"Helvetica Neue",Arial,sans-serif;
+  html,body{margin:0;height:100%}
+  /* Cała strona jest areną: jeden nieprzewijany viewport, bez osobnego
+     ekranu startowego. `100dvh` zamiast `100vh`, żeby pasek adresu w
+     mobilnej przeglądarce nie ucinał dołu areny. */
+  body{background-color:var(--bg);color:var(--ink);font-family:var(--font-term),monospace;
     line-height:1.5;-webkit-font-smoothing:antialiased;
-    background-image:
-      radial-gradient(120% 90% at 18% -12%, rgba(255,180,120,.06), transparent 55%),
-      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.05'/%3E%3C/svg%3E");
-    background-repeat:no-repeat,repeat}
+    height:100dvh;width:100vw;overflow:hidden;overscroll-behavior:none}
   /* Nakładka CRT: cienkie poziome linie na całej stronie, stałe względem
      ekranu (position:fixed), więc nie przewijają się razem z treścią i nie
      zależą od wysokości żadnego kontenera. `pointer-events:none`, żeby nic
@@ -53,54 +62,74 @@
     background-image:repeating-linear-gradient(to bottom,
       rgba(0,0,0,0) 0px, rgba(0,0,0,0) 1px, rgba(0,0,0,.25) 2px, rgba(0,0,0,0) 3px);
     mix-blend-mode:multiply;opacity:.6}
-  .wrap{max-width:64rem;margin:0 auto;padding:1.75rem 1.25rem 4rem}
 
-  .poster{text-align:center;border-bottom:4px double var(--ink);padding-bottom:1.25rem}
-  .poster .venue{font-size:.8rem;color:var(--ink-soft);letter-spacing:.06em}
-  .poster h1{font-family:var(--font-pixel),var(--font-anton),Impact,sans-serif;font-weight:400;
-    font-size:clamp(1.5rem,6.5vw,3.4rem);
-    line-height:1.35;margin:.35rem 0 .4rem;text-transform:uppercase}
-  .poster h1 .v{color:var(--red);display:block;font-size:.42em;letter-spacing:.2em;margin:.15em 0}
-  .poster p{margin:.5rem auto 0;max-width:44ch;color:var(--ink-soft);font-size:.95rem}
-
-  .corners{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:2rem}
-  @media (max-width:44rem){.corners{grid-template-columns:1fr}}
-  .corner{background:linear-gradient(160deg,var(--red-wash) 0%,var(--card) 60%);
-    border:1px solid var(--rule);border-top:7px solid var(--red);padding:1rem;
-    box-shadow:0 0 14px var(--red-wash),inset 0 0 24px var(--red-wash)}
-  .corner.b{background:linear-gradient(160deg,var(--blue-wash) 0%,var(--card) 60%);border-top-color:var(--blue);
-    box-shadow:0 0 14px var(--blue-wash),inset 0 0 24px var(--blue-wash)}
-  .corner h2{font-family:var(--font-pixel),var(--font-anton),Impact,sans-serif;font-weight:400;font-size:.95rem;text-transform:uppercase;
-    letter-spacing:.04em;margin:0 0 .75rem;color:var(--red);text-shadow:0 0 8px var(--red)}
-  .corner.b h2{color:var(--blue);text-shadow:0 0 8px var(--blue)}
-  .row{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
-  .field{display:flex;flex-direction:column;gap:.25rem;margin-bottom:.6rem}
-  .field.full{grid-column:1/-1}
-  .field span{font-family:var(--font-pixel),var(--font-anton),Impact,sans-serif;font-size:.62rem;
-    line-height:1.6;color:var(--ink-soft)}
-  input{font:inherit;font-size:.92rem;color:var(--ink);background:var(--bg);border:1px solid var(--rule);
-    border-radius:2px;padding:.5rem .55rem;width:100%}
-  input:focus{outline:2px solid var(--gold);outline-offset:1px}
-
-  .controls{margin-top:1.5rem;display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;justify-content:center}
-  button.main{font-family:var(--font-anton),Impact,sans-serif;font-size:1.25rem;letter-spacing:.05em;text-transform:uppercase;
-    cursor:pointer;background:var(--ink);color:var(--bg);border:none;border-radius:2px;padding:.65rem 2rem}
-  button.main:hover{background:var(--red)}
-  button.main:disabled{opacity:.4;cursor:default}
-  button.chip{font:inherit;font-size:.82rem;background:transparent;color:var(--ink-soft);
-    border:1px dashed var(--rule);border-radius:99px;padding:.3rem .8rem;cursor:pointer}
-  button.chip:hover{color:var(--gold);border-color:var(--gold)}
-  .status{font-size:.88rem;color:var(--ink-soft);text-align:center;margin-top:.6rem;min-height:1.3em}
-
-  /* ---------- the ring ---------- */
-  .arena{margin-top:2.5rem;border:1px solid var(--rule);
-    padding:1.1rem 1rem 1rem;position:relative;overflow:hidden;
-    box-shadow:0 0 18px rgba(57,255,106,.16);
+  /* ---------- arena pełnoekranowa ---------- */
+  .cage{position:fixed;inset:0;overflow:hidden;background:var(--canvas)}
+  .cage-bg{position:absolute;inset:0;z-index:0;pointer-events:none;opacity:.92;
     background-color:var(--canvas);
     background-image:
-      radial-gradient(140% 120% at 50% -25%, rgba(255,180,110,.08), transparent 60%),
+      radial-gradient(112% 86% at 50% 40%, transparent 40%, rgba(0,0,0,.68) 100%),
+      radial-gradient(120% 90% at 18% -12%, rgba(255,180,120,.05), transparent 55%),
+      url('/arena/ring.jpeg'),
       url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.06'/%3E%3C/svg%3E");
-    background-repeat:no-repeat,repeat}
+    background-size:cover,cover,cover,auto;
+    background-position:center,center,center 62%,center;
+    background-repeat:no-repeat,no-repeat,no-repeat,repeat;
+    /* Pixel art malowany razem z ringiem — bez tego przeglądarka wygładza
+       piksele przy skalowaniu i obraz traci ostrość. */
+    image-rendering:pixelated}
+
+  /* ---------- pasek terminala ---------- */
+  /* Jedyny element pozycjonowany `absolute` w tym pasku: pasek i komunikaty
+     pod nim (`.status`, `.crossclass`, `.tracked-note`) są jego zwykłymi,
+     następującymi po sobie dziećmi w przepływie. Wcześniej `.termbar` sam
+     był `position:absolute`, więc jego rodzeństwo — nie mając czego się
+     trzymać w przepływie — renderowało się na tej samej wysokości co pasek,
+     nie pod nim. */
+  .topbar{position:absolute;top:0;left:0;right:0;z-index:30}
+  .termbar{display:flex;align-items:stretch;
+    gap:.75rem;padding:.65rem .9rem;background:rgba(4,9,10,.82);
+    border-bottom:1px solid var(--rule);box-shadow:0 0 16px rgba(57,255,106,.14)}
+  .term-field{flex:1 1 0;display:flex;flex-direction:column;gap:.25rem;justify-content:center;min-width:0}
+  .term-field label{font-family:var(--font-pixel);font-size:.52rem;line-height:1.6;
+    letter-spacing:.05em;color:var(--red)}
+  .term-field.blue label{color:var(--blue);text-align:right}
+  .term-field input{font:inherit;font-family:var(--font-term);font-size:.85rem;color:var(--ink);
+    background:rgba(0,0,0,.5);border:1px solid var(--red);border-radius:2px;padding:.4rem .55rem;
+    width:100%;box-shadow:0 0 8px var(--red-wash) inset,0 0 6px var(--red-wash)}
+  .term-field.blue input{border-color:var(--blue);text-align:right;
+    box-shadow:0 0 8px var(--blue-wash) inset,0 0 6px var(--blue-wash)}
+  .term-field input:focus{outline:2px solid var(--gold);outline-offset:1px}
+  .term-actions{flex:0 0 auto;display:flex;align-items:center;gap:.5rem}
+  button.term-go{font-family:var(--font-pixel);font-size:.6rem;line-height:1.6;letter-spacing:.04em;
+    text-transform:uppercase;cursor:pointer;background:var(--ink);color:var(--bg);border:none;
+    border-radius:2px;padding:.55rem .9rem;white-space:nowrap;box-shadow:0 0 10px rgba(57,255,106,.35)}
+  button.term-go:hover{background:var(--neon-green)}
+  button.term-go:disabled{opacity:.4;cursor:default}
+  button.chip{font:inherit;font-family:var(--font-term);font-size:.72rem;background:transparent;
+    color:var(--ink-soft);border:1px dashed var(--rule);border-radius:99px;padding:.3rem .7rem;
+    cursor:pointer;white-space:nowrap}
+  button.chip:hover{color:var(--gold);border-color:var(--gold)}
+  @media (max-width:44rem){
+    .termbar{flex-wrap:wrap}
+    .term-field{flex:1 1 40%}
+    .term-actions{order:3;flex:1 1 100%;justify-content:center}
+  }
+
+  .status{font-size:.78rem;font-family:var(--font-term);color:var(--ink-soft);text-align:center;
+    margin:.5rem auto 0;min-height:1.2em;padding:0 1rem}
+  .crossclass{margin:.4rem auto 0;max-width:52ch;text-align:center;font-size:.78rem;color:var(--gold);
+    border:1px dashed var(--gold);padding:.35rem .7rem;background:rgba(4,9,10,.7)}
+  .tracked-note{margin:.5rem auto 0;max-width:60ch;text-align:center;font-size:.7rem;
+    color:var(--ink-soft);padding:0 1rem}
+
+  /* ---------- ring, wyśrodkowany w pełnoekranowym viewporcie ---------- */
+  .stage-floor{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    padding:5.5rem 1rem 1rem;z-index:5;pointer-events:none}
+  .stage-floor .arena{pointer-events:auto}
+
+  .arena{width:100%;max-width:38rem;
+    padding:1.1rem 1rem 1rem;position:relative;overflow:hidden}
   .arena.shake{animation:shake .4s}
   @keyframes shake{0%,100%{transform:none}20%{transform:translate(4px,-3px)}40%{transform:translate(-5px,2px)}
     60%{transform:translate(3px,3px)}80%{transform:translate(-3px,-2px)}}
@@ -110,7 +139,7 @@
     font-size:clamp(.8rem,2.6vw,1.2rem);color:var(--red)}
   .sb.b{text-align:right}
   .sb.b .nm{color:var(--blue)}
-  .sb .meta{font-size:.7rem;color:var(--ink-soft)}
+  .sb .meta{font-size:.7rem;font-family:var(--font-term);color:var(--ink-soft)}
   /* Pasek życia: `container-type` trzyma szerokość referencyjną gradientu
      stałą względem samego `.hpbar`, więc `background-size:100cqw` nie kurczy
      się razem z `i` — koniuszek paska (mało HP) zawsze wypada bliżej
@@ -129,7 +158,10 @@
     font-size:.62rem;line-height:1.6;color:var(--ink-soft);text-align:center;white-space:nowrap}
 
   .ring{position:relative;margin-top:.5rem;padding:.5rem 0 0}
-  .ring .ropes{position:absolute;left:0;right:0;top:1.2rem;height:5.2rem;pointer-events:none;opacity:.5}
+  /* Liny i słupki są teraz namalowane w tle (`ring.jpeg`) razem z ringiem —
+     rysowana wersja (linie + rogi na `::before`/`::after` niżej) zostaje
+     wyłączona, żeby się nie dublowały. */
+  .ring .ropes{display:none}
   .ring .ropes span{position:absolute;left:0;right:0;height:2px;background:var(--rule)}
   .ring .ropes span:nth-child(1){top:0}
   .ring .ropes span:nth-child(2){top:45%}
@@ -143,19 +175,18 @@
   .fighter.b.step-forward{transform:translateX(-18px)}
   .fighter.step-back{transform:translateX(-12px)}
   .fighter.b.step-back{transform:translateX(12px)}
-  .fighter .arm-lead{transition:transform .16s cubic-bezier(.3,1.6,.5,1);transform-origin:74px 84px}
-  .fighter.punch .arm-lead{transform:translateX(30px) rotate(-4deg)}
-  .fighter .arm-rear{transition:transform .16s cubic-bezier(.3,1.6,.5,1);transform-origin:50px 92px}
-  .fighter.round-3 .arm-rear{transform:translateY(8px)}
-  .fighter.round-3 .arm-lead{transform:translateY(8px)}
+  /* Byk i niedźwiedź to gotowe PNG-i, nie wygładzane przy skalowaniu —
+     inaczej pixel-artowa kreska rozmywałaby się na krawędziach. */
+  .fighter image{image-rendering:pixelated}
+  /* Cios przełącza wariant obrazka zamiast poruszać ręką osobno: ta sama
+     klasa `.punch`, którą `throwPunch()` w page.tsx dokłada do `.fighter`
+     na czas wymachu, chowa gardę i pokazuje cios. */
+  .fighter .pose-punch{opacity:0}
+  .fighter.punch .pose-guard{opacity:0}
+  .fighter.punch .pose-punch{opacity:1}
   .fighter .stance{transition:transform .24s cubic-bezier(.2,.8,.3,1);transform-origin:60px 168px}
   .fighter.punch .stance{animation:lunge .48s cubic-bezier(.2,.8,.3,1)}
   @keyframes lunge{0%{transform:none}45%{transform:translateX(14px)}100%{transform:none}}
-  .fighter .torso{transition:transform .24s cubic-bezier(.2,.8,.3,1);transform-origin:60px 110px}
-  .fighter.punch .torso{animation:twist .48s cubic-bezier(.2,.8,.3,1)}
-  @keyframes twist{0%{transform:none}45%{transform:rotate(8deg)}100%{transform:none}}
-  .fighter .head{transition:transform .18s ease-out;transform-origin:64px 56px}
-  .fighter.hit .head{transform:translate(-13px,7px) rotate(-17deg)}
   .fighter .sway{transition:transform .6s ease-in-out;transform-origin:60px 168px}
   .fighter.low-hp .sway{animation:wobble 2.8s ease-in-out infinite}
   @keyframes wobble{0%,100%{transform:rotate(0)}25%{transform:rotate(-3deg)}75%{transform:rotate(3deg)}}
@@ -163,8 +194,6 @@
   .fighter.down .fig{transform:translate(4px,26px) rotate(-74deg)}
   .fighter.hit .fig{animation:jolt .28s}
   @keyframes jolt{0%{transform:none}30%{transform:translateX(-7px)}100%{transform:none}}
-  .fighter .brow{transition:transform .14s}
-  .fighter.punch .brow{transform:translateY(-2px)}
   .pop{position:absolute;top:1rem;left:50%;transform:translateX(-50%);font-family:var(--font-anton),Impact,sans-serif;
     font-size:1.7rem;color:var(--gold);pointer-events:none;animation:pop 1s ease-out forwards;z-index:3}
   @keyframes pop{0%{opacity:0;transform:translate(-50%,0) scale(.7)}
@@ -177,95 +206,150 @@
   .kostamp b{font-family:var(--font-anton),Impact,sans-serif;font-size:clamp(3rem,16vw,7rem);color:var(--red);
     text-transform:uppercase;letter-spacing:.05em;animation:stamp .35s ease-out both}
   @keyframes stamp{from{transform:scale(2.6) rotate(-8deg);opacity:0}to{transform:scale(1) rotate(-8deg);opacity:1}}
-  .calls{border-top:1px solid var(--rule);padding-top:.8rem;margin-top:.5rem;min-height:4.4rem}
-  .calls p{margin:0 0 .3rem;font-size:.98rem}
-  .calls p.col{margin:0;color:var(--ink-soft);font-size:.9rem;font-style:italic}
   .arena .bottom{display:flex;justify-content:space-between;align-items:center;gap:1rem;margin-top:.7rem}
-  .arena .bottom button{font:inherit;font-size:.8rem;background:none;border:1px solid var(--rule);
-    color:var(--ink-soft);border-radius:2px;padding:.3rem .7rem;cursor:pointer}
+  .arena .bottom button{font:inherit;font-family:var(--font-term);font-size:.75rem;background:none;
+    border:1px solid var(--rule);color:var(--ink-soft);border-radius:2px;padding:.3rem .7rem;cursor:pointer}
   @media (prefers-reduced-motion:reduce){
-    .fighter,.hpbar i,.fighter .arm-lead,.fighter .arm-rear,.fighter .head,.fighter .fig,.fighter .stance,.fighter .torso,.fighter .sway{transition:none}
+    .fighter,.hpbar i,.fighter .fig,.fighter .stance,.fighter .sway{transition:none}
     .fighter.step-forward,.fighter.step-back{transition:none}
-    .fighter.hit .fig,.fighter.punch .stance,.fighter.punch .torso,.fighter.low-hp .sway,.flash.on,.pop,.kostamp b,.arena.shake{animation:none}
+    .fighter.hit .fig,.fighter.punch .stance,.fighter.low-hp .sway,.flash.on,.pop,.kostamp b,.arena.shake{animation:none}
   }
 
-  .tape{margin-top:1rem;background:var(--card);border:1px solid var(--rule);padding:1.25rem;
-    box-shadow:0 0 10px rgba(57,255,106,.15),inset 0 0 20px rgba(57,255,106,.04)}
-  .tape h3{font-family:var(--font-pixel),var(--font-anton),Impact,sans-serif;font-weight:400;text-transform:uppercase;letter-spacing:.08em;
-    font-size:.82rem;line-height:1.6;text-align:center;margin:0 0 1rem;color:var(--ink-soft)}
-  .stat{display:grid;grid-template-columns:1fr 6.5rem 1fr;align-items:center;gap:.5rem;margin-bottom:.7rem}
-  .stat .lbl{font-family:var(--font-pixel),var(--font-anton),Impact,sans-serif;text-align:center;
-    font-size:.6rem;line-height:1.6;color:var(--ink-soft)}
-  .bar{height:1.35rem;background:var(--shade);position:relative;overflow:hidden}
-  .bar i{position:absolute;top:0;bottom:0;display:block;background:var(--red)}
-  .bar.l i{right:0}
-  .bar.r i{left:0;background:var(--blue)}
-  .bar b{position:absolute;top:0;line-height:1.35rem;font-size:.78rem;font-weight:600;
-    font-variant-numeric:tabular-nums;color:var(--ink)}
-  .bar.l b{left:.4rem}
-  .bar.r b{right:.4rem}
+  /* ---------- pływające karty (tale of the tape / ringside read) ---------- */
+  /* Czerwone karty po lewej, niebieskie po prawej (CLAUDE.md-owy podział na
+     narożniki), nałożone na tło areny. Zaczynają schowane (`hidden`) i
+     wchodzą w trakcie walki, jedna po drugiej. */
+  .side-stack{position:absolute;top:5.4rem;bottom:4.5rem;z-index:15;
+    display:flex;flex-direction:column;gap:.75rem;width:16rem;max-width:29vw;
+    overflow-y:auto;overflow-x:hidden;pointer-events:none;scrollbar-width:thin}
+  .side-stack.left{left:1rem;align-items:flex-start}
+  .side-stack.right{right:1rem;align-items:flex-end}
+  .side-stack > *{pointer-events:auto;width:100%}
 
-  .read{margin-top:1rem;background:var(--card);border:1px solid var(--rule);padding:1.25rem;
-    box-shadow:0 0 10px rgba(57,255,106,.15),inset 0 0 20px rgba(57,255,106,.04)}
-  .read h3{font-family:var(--font-pixel),var(--font-anton),Impact,sans-serif;font-weight:400;text-transform:uppercase;letter-spacing:.08em;
-    font-size:.82rem;line-height:1.6;text-align:center;margin:0 0 .3rem;color:var(--ink-soft)}
-  .read .why{text-align:center;font-size:.82rem;color:var(--ink-soft);margin:0 0 1rem}
-  .reads{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
-  @media (max-width:40rem){.reads{grid-template-columns:1fr}}
-  .rcard{border-top:3px solid var(--red);padding-top:.6rem;box-shadow:0 -6px 12px -6px var(--red-wash)}
-  .rcard.b{border-top-color:var(--blue);box-shadow:0 -6px 12px -6px var(--blue-wash)}
-  .rcard h4{font-family:var(--font-pixel),var(--font-anton),Impact,sans-serif;font-weight:400;text-transform:uppercase;font-size:.85rem;
-    line-height:1.5;margin:0 0 .5rem;color:var(--red)}
-  .rcard.b h4{color:var(--blue)}
-  .rcard dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:.3rem .6rem;font-size:.88rem}
-  .rcard dt{color:var(--ink-soft)}
-  .rcard dd{margin:0;text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
-  .rcard .say{margin:.6rem 0 0;font-size:.85rem;color:var(--ink-soft);line-height:1.45}
-  .headline{margin:1rem 0 0;padding-top:.9rem;border-top:1px solid var(--rule);font-size:.95rem;text-align:center}
+  .float-card{background:rgba(6,14,12,.82);border:1px solid var(--rule);border-radius:3px;
+    padding:.75rem .8rem;font-family:var(--font-term);font-size:.78rem;
+    backdrop-filter:blur(2px);animation:cardIn .35s ease-out both}
+  @keyframes cardIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .float-card.red{border-color:var(--red);box-shadow:0 0 14px var(--red-wash),inset 0 0 18px var(--red-wash)}
+  .float-card.blue{border-color:var(--blue);box-shadow:0 0 14px var(--blue-wash),inset 0 0 18px var(--blue-wash)}
 
-  .verdict{margin-top:1rem;border:3px solid var(--ink);background:var(--card);padding:1.25rem;text-align:center;
-    box-shadow:0 0 16px rgba(57,255,106,.2),inset 0 0 24px rgba(57,255,106,.05)}
-  .verdict .w{font-family:var(--font-anton),Impact,sans-serif;font-size:clamp(1.6rem,6vw,2.6rem);text-transform:uppercase;
-    line-height:1;margin:0}
-  .verdict .how{color:var(--ink-soft);font-size:.9rem;margin:.5rem 0 0}
-  .verdict .seed{color:var(--ink-soft);font-size:.75rem;margin:.75rem 0 0}
+  .float-card.tape-card h4{margin:0 0 .5rem;display:flex;align-items:center;justify-content:space-between;
+    gap:.5rem;font-family:var(--font-pixel),var(--font-anton),Impact,sans-serif;font-weight:400;
+    font-size:.7rem;line-height:1.5;text-transform:uppercase;color:var(--red)}
+  .float-card.blue.tape-card h4{color:var(--blue)}
+  .float-card.tape-card .tick{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+  .float-card.tape-card dl{margin:0;display:grid;grid-template-columns:1fr 1fr;gap:.3rem .7rem;font-size:.74rem}
+  .float-card.tape-card dl>div{display:flex;justify-content:space-between;gap:.4rem;
+    border-bottom:1px dotted var(--rule);padding-bottom:.2rem}
+  .float-card.tape-card dt{color:var(--ink-soft)}
+  .float-card.tape-card dd{margin:0;font-variant-numeric:tabular-nums}
+  .float-card.tape-card dl>div.wide{grid-column:1/-1}
 
-  .ladder{margin-top:3rem}
-  .ladder h3{font-family:var(--font-pixel),var(--font-anton),Impact,sans-serif;font-weight:400;text-transform:uppercase;letter-spacing:.06em;
-    font-size:.82rem;line-height:1.6;margin:0 0 .2rem}
-  .ladder p.sub{color:var(--ink-soft);font-size:.85rem;margin:0 0 .9rem;max-width:56ch}
-  table{width:100%;border-collapse:collapse;font-size:.9rem}
-  th,td{text-align:left;padding:.45rem .4rem;border-bottom:1px solid var(--rule)}
-  th{font-family:var(--font-pixel),var(--font-anton),Impact,sans-serif;font-weight:400;color:var(--ink-soft);
-    font-size:.62rem;line-height:1.6}
-  td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
-  .empty{color:var(--ink-soft);font-size:.9rem;border:1px dashed var(--rule);padding:1rem}
+  .stat-rows{margin-top:.65rem;border-top:1px solid var(--rule);padding-top:.55rem}
+  .stat-row{display:grid;grid-template-columns:3.6rem 1fr 1.6rem;align-items:center;gap:.4rem;
+    margin-bottom:.35rem;font-size:.68rem}
+  .stat-row .stat-lbl{font-family:var(--font-pixel);font-size:.5rem;line-height:1.5;color:var(--ink-soft);
+    text-transform:uppercase}
+  .stat-bar{height:.5rem;background:var(--shade);position:relative;overflow:hidden}
+  .stat-bar i{position:absolute;inset:0 auto 0 0;display:block;background:var(--red)}
+  .float-card.blue .stat-bar i{background:var(--blue)}
+  .stat-row .stat-val{text-align:right;font-variant-numeric:tabular-nums}
+
+  .weight{font-family:var(--font-pixel);font-size:.5rem;line-height:1.5;letter-spacing:.02em;
+    text-transform:uppercase;color:var(--ink-soft);border:1px solid var(--rule);border-radius:99px;
+    padding:.1rem .5rem;white-space:nowrap}
+  .weight:empty{display:none}
+
+  .float-card.read-card h4{margin:0 0 .4rem;font-family:var(--font-pixel),var(--font-anton),Impact,sans-serif;
+    font-weight:400;text-transform:uppercase;font-size:.68rem;line-height:1.5;color:var(--red)}
+  .float-card.blue.read-card h4{color:var(--blue)}
+  .float-card.read-card dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:.25rem .6rem;font-size:.72rem}
+  .float-card.read-card dt{color:var(--ink-soft)}
+  .float-card.read-card dd{margin:0;text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+  .float-card.read-card .say{margin:.55rem 0 0;font-size:.7rem;color:var(--ink-soft);line-height:1.4}
+
+  @media (max-width:68rem){
+    .side-stack{width:13.5rem}
+  }
+  @media (max-width:56rem){
+    /* Za wąsko na ring pośrodku plus dwie kolumny kart nałożone na tło —
+       karty schodzą pod ring, w normalnym przepływie `.stage-floor`
+       (który sam w sobie może się przewijać), strona wciąż stoi w miejscu. */
+    .stage-floor{position:static;flex-direction:column;height:calc(100dvh - 3.6rem);
+      margin-top:3.6rem;overflow-y:auto;padding:.75rem}
+    .side-stack{position:static;width:100%;max-width:none;height:auto;overflow:visible;
+      flex-direction:row;flex-wrap:wrap}
+    .side-stack.left,.side-stack.right{align-items:stretch}
+    .float-card{max-width:calc(50% - .4rem)}
+    .judge-panel{position:static;transform:none;width:100%;margin-top:.75rem;max-width:none}
+  }
+
+  /* ---------- panel sędziego: kwestie + werdykt, na dole środkiem ---------- */
+  /* Wysokość ograniczona i przewijana wewnątrz: pod koniec walki panel
+     kumuluje kwestię rundy, nagłówek ringside read, werdykt i notkę na raz —
+     bez limitu rósłby na tyle wysoko, że zasłoniłby ring. Werdykt to puenta
+     całej walki, więc ring musi zostać widoczny nad panelem. */
+  .judge-panel{position:absolute;left:50%;bottom:1rem;transform:translateX(-50%);z-index:20;
+    width:min(90vw,34rem);max-height:26vh;overflow-y:auto;background:rgba(6,14,12,.85);border:1px solid var(--gold);
+    border-radius:3px;padding:.7rem .9rem;box-shadow:0 0 16px rgba(255,210,63,.18),inset 0 0 18px rgba(255,210,63,.05);
+    font-family:var(--font-term)}
+  .calls{min-height:2.2rem}
+  .calls p{margin:0 0 .3rem;font-size:.85rem;overflow-wrap:anywhere}
+  .calls p.col{margin:0;color:var(--ink-soft);font-size:.78rem;font-style:italic}
+  .calls p.ref{margin:0 0 .3rem;font-family:var(--font-anton),Impact,sans-serif;text-transform:uppercase;
+    letter-spacing:.06em;font-size:.82rem;color:var(--gold)}
+  .count{font-variant-numeric:tabular-nums;letter-spacing:.3em}
+
+  .read-headline{margin:.5rem 0 0;padding-top:.5rem;border-top:1px dotted var(--rule);
+    font-size:.74rem;text-align:center;color:var(--ink-soft)}
+
+  .verdict{margin-top:.5rem;padding-top:.5rem;border-top:1px solid var(--rule);text-align:center}
+  .verdict .w{font-family:var(--font-anton),Impact,sans-serif;font-size:clamp(1.1rem,4vw,1.6rem);
+    text-transform:uppercase;line-height:1;margin:0}
+  .verdict .how{color:var(--ink-soft);font-size:.8rem;margin:.4rem 0 0}
+  .verdict .seed{color:var(--ink-soft);font-size:.66rem;margin:.55rem 0 0}
+  .note-line{margin:.4rem 0 0;font-size:.66rem;color:var(--ink-soft);text-align:center}
+  .note-line:empty{display:none}
+
+  /* ---------- ranking: chowana szuflada z boku ---------- */
+  .ladder-tab{position:fixed;top:50%;right:0;transform:translateY(-50%) rotate(180deg);
+    writing-mode:vertical-rl;z-index:40;font-family:var(--font-pixel);font-size:.55rem;
+    letter-spacing:.06em;text-transform:uppercase;color:var(--ink);background:rgba(6,14,12,.9);
+    border:1px solid var(--neon-green);border-right:none;border-radius:4px 0 0 4px;
+    padding:.9rem .45rem;cursor:pointer;box-shadow:0 0 10px rgba(57,255,106,.25)}
+  .ladder-tab:hover{color:var(--neon-green)}
+  .ladder-drawer{position:fixed;top:0;right:0;bottom:0;width:min(88vw,26rem);z-index:39;
+    background:rgba(3,7,7,.97);border-left:1px solid var(--rule);box-shadow:-8px 0 24px rgba(0,0,0,.5);
+    padding:1.1rem 1.1rem 1.5rem;overflow-y:auto;transform:translateX(100%);
+    transition:transform .32s cubic-bezier(.2,.8,.3,1)}
+  .ladder-drawer.open{transform:translateX(0)}
+  .ladder-drawer h3{font-family:var(--font-pixel),var(--font-anton),Impact,sans-serif;font-weight:400;
+    text-transform:uppercase;letter-spacing:.06em;font-size:.82rem;line-height:1.6;margin:0 0 .2rem}
+  .ladder-drawer p.sub{color:var(--ink-soft);font-size:.8rem;margin:0 0 .9rem;font-family:var(--font-term)}
+  .ladder-drawer footer{margin-top:1.5rem;border-top:1px solid var(--rule);padding-top:.75rem;
+    color:var(--ink-soft);font-size:.72rem;font-family:var(--font-term)}
   .scroller{overflow-x:auto}
+  .none{color:var(--ink-soft);font-size:.8rem;margin:0;font-family:var(--font-term)}
 
-  /* Drabina: pięć list obok siebie, po jednej na kategorię wagową.
-     Na wąskim ekranie schodzą pod siebie — kolumny nie mieszczą się na telefonie. */
-  #ladder{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:.75rem}
+  /* Drabina: listy po jednej na kategorię wagową, jedna pod drugą w szufladzie. */
+  #ladder{display:flex;flex-direction:column;gap:.75rem}
   .board{border:1px solid var(--rule);background:var(--card);padding:.7rem .8rem;
     box-shadow:0 0 8px rgba(57,255,106,.12)}
-  .board h4{margin:0 0 .5rem;font-size:.75rem;text-transform:uppercase;letter-spacing:.06em;
+  .board h4{margin:0 0 .5rem;font-size:.72rem;text-transform:uppercase;letter-spacing:.06em;
     font-weight:600;display:flex;justify-content:space-between;gap:.5rem;align-items:baseline;
-    border-bottom:1px solid var(--rule);padding-bottom:.4rem}
+    border-bottom:1px solid var(--rule);padding-bottom:.4rem;font-family:var(--font-term)}
   .board h4 .cnt{color:var(--ink-soft);font-weight:400;font-variant-numeric:tabular-nums}
   .board ol{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:.35rem}
   .board li{display:grid;grid-template-columns:1.2rem 1fr auto auto;gap:.4rem;align-items:baseline;
-    font-size:.85rem}
+    font-size:.8rem;font-family:var(--font-term)}
   .board .rank{color:var(--ink-soft);font-variant-numeric:tabular-nums}
-  .board .tick{font-family:var(--font-pixel),var(--font-anton),Impact,sans-serif;font-weight:400;
+  .board .tick{font-family:var(--font-pixel);font-size:.62rem;
     overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .board .rec,.board .pts{font-variant-numeric:tabular-nums;color:var(--ink-soft)}
   .board .pts{font-weight:600;color:var(--ink)}
   /* Przypisy pod wierszem: nokauty i walki poza kategorią. */
-  .board .ko,.board .up{grid-column:2/-1;font-size:.7rem;color:var(--ink-soft)}
+  .board .ko,.board .up{grid-column:2/-1;font-size:.68rem;color:var(--ink-soft)}
   .board .up{color:var(--gold)}
-  .none{color:var(--ink-soft);font-size:.8rem;margin:0}
-  footer{margin-top:3rem;border-top:1px solid var(--rule);padding-top:1rem;color:var(--ink-soft);
-    font-size:.8rem;display:flex;justify-content:space-between;gap:1rem;flex-wrap:wrap}
-  /* ---------- dopisane przy przenoszeniu na Next.js ---------- */
 
   /* Atrybut `hidden` musi wygrywać z `display` z arkusza.
      Reguła przeglądarki `[hidden]{display:none}` ma niższy priorytet niż
@@ -273,47 +357,6 @@
      i pieczątka „KO" wisiała w ringu przy każdej walce — także tej wygranej
      na punkty. Ten sam błąd siedział w prototypie. */
   [hidden]{display:none !important}
-
-  /* Liczby wpisywało się ręcznie w prototypie; teraz przychodzą z /api/fight,
-     więc nie są polami formularza, a odczytem. Stały tu wcześniej inputy
-     z `readOnly` — pole, w które nie da się pisać, czyta się jak zepsuty
-     formularz. Reguły `input[readonly]` zeszły razem z nimi. */
-  .readout{margin-top:.9rem;border-top:1px solid var(--rule);padding-top:.75rem}
-  .readout .tick{font-family:var(--font-pixel),var(--font-anton),Impact,sans-serif;font-size:1.4rem;line-height:1.4;
-    text-transform:uppercase;min-height:2rem;color:var(--ink-soft)}
-  .corner.a .readout .tick:not(:empty){color:var(--red)}
-  .corner.b .readout .tick:not(:empty){color:var(--blue)}
-  .readout dl{display:grid;grid-template-columns:1fr 1fr;gap:.4rem .9rem;margin:.75rem 0 0}
-  .readout dl>div{display:flex;justify-content:space-between;align-items:baseline;gap:.5rem;
-    border-bottom:1px dotted var(--rule);padding-bottom:.28rem}
-  .readout dt{font-family:var(--font-pixel),var(--font-anton),Impact,sans-serif;font-size:.58rem;line-height:1.6;
-    letter-spacing:.03em;text-transform:uppercase;color:var(--ink-soft);white-space:nowrap}
-  .readout dd{margin:0;font-variant-numeric:tabular-nums;font-size:1rem}
-  .readout .hint{margin:.65rem 0 0;font-size:.73rem;color:var(--ink-soft)}
-  /* Licznik obserwowanych portfeli: wiersz na obie kolumny, bo dochodzi jako
-     piąty do siatki ustawionej po dwa i sam w rzędzie wyglądałby na urwany. */
-  .readout dl>div.wide{grid-column:1/-1}
-  .tracked-note{margin:.8rem auto 0;max-width:62ch;text-align:center;font-size:.73rem;
-    color:var(--ink-soft)}
-
-  /* Kategoria wagowa: kapitalizacja nie jest statystyką bojową, wyznacza
-     półkę (CLAUDE.md § Kategorie wagowe). */
-  .weight{font-family:var(--font-pixel),var(--font-anton),Impact,sans-serif;font-size:.56rem;line-height:1.6;
-    letter-spacing:.03em;text-transform:uppercase;color:var(--ink-soft);
-    border:1px solid var(--rule);border-radius:99px;padding:.12rem .55rem;display:inline-block}
-  .corner h2{display:flex;align-items:center;gap:.6rem;justify-content:space-between}
-  .crossclass{margin:1rem auto 0;max-width:52ch;text-align:center;font-size:.82rem;color:var(--gold);
-    border:1px dashed var(--gold);padding:.4rem .7rem}
-
-  /* Sędzia mówi szablonem z wyniku symulacji, nie z modelu — dlatego
-     wyróżniony wizualnie od kwestii komentatorów. */
-  /* Kwestie przychodzą z modelu. Nawet przy limicie 140 znaków może wrócić
-     ciąg bez spacji, a taki nie ma gdzie się złamać i wychodzi za panel. */
-  .calls p{overflow-wrap:anywhere}
-  .calls p.ref{margin:0 0 .3rem;font-family:var(--font-anton),Impact,sans-serif;text-transform:uppercase;
-    letter-spacing:.06em;font-size:.86rem;color:var(--gold)}
-  .count{font-variant-numeric:tabular-nums;letter-spacing:.3em}
-  .weight:empty{display:none}
 
   /* ---------- sędzia ---------- */
   /* Tung Tung Tung Sahur. Postać to dwa obrazki z modelu — kłoda i pałka —
@@ -374,38 +417,27 @@
   }
 
   /* ---------- światła gasną ---------- */
-  /* Wejście zostaje kremowym plakatem, arena po pierwszym gongu przechodzi
-     na ciemno. Robi to podmiana zmiennych na samej `.arena`, nie drugi
-     zestaw reguł: wszystko w środku — liny, podłoga, kwestie, sylwetki,
-     sędzia, drewno pałki — przestawia się razem z nią i zostaje spójne
-     w obu motywach systemowych. */
-  .arena{transition:background-color .7s ease,border-color .7s ease,color .7s ease}
+  /* Wejście zostaje jaśniejsze, arena po pierwszym gongu przechodzi na
+     ciemno. Robi to podmiana zmiennych na samej `.arena`, nie drugi
+     zestaw reguł: wszystko w środku — liny, podłoga, sylwetki, sędzia,
+     drewno pałki — przestawia się razem z nią i zostaje spójne w obu
+     motywach systemowych. */
+  .arena{transition:color .7s ease}
   .arena.lights-down{
     --canvas:#0D0904; --card:#1B130C; --ink:#F2E8D8; --ink-soft:#B6A48A;
     --rule:#3C2E1F; --shade:rgba(255,220,180,.09);
     --red:#FF5A46; --blue:#4DAAFF; --gold:#E8B34A;
     --wood:#9A6733; --wood-lit:#BC8349; --wood-dim:#6A4320;
-    background-color:var(--canvas);border-color:var(--rule);color:var(--ink)}
+    color:var(--ink)}
 
   /* Hala: obraz wygenerowany przez google/gemini-3-pro-image, prompt i
      wywołanie w scripts/generate-art.ts. To jedyny element wizualny,
      który wolno wygenerować jako obrazek — jest statyczny i nie musi się
      ruszać. Zawodnicy i sędzia zostają rysowani proceduralnie, bo oni się
-     ruszają (CLAUDE.md § Sędzia).
-
-     Obraz ma już wmalowane dwa snopy światła, mgłę, tłum w cieniu i poświatę
-     na deskach. Dlatego proceduralne stożki z `clip-path` i sylwetki tłumu
-     z SVG zeszły stąd razem z modułem arena-svg.ts: dwie warstwy tego samego
-     gryzły się, a malowany tłum siedzi w połowie wysokości po prawej, nie
-     pasem u góry. Zostaje winieta, żeby krawędzie opadły i rysowane sylwetki
-     się od tła odcinały. */
-  .ring .backdrop{position:absolute;inset:-.5rem 0 0;z-index:0;pointer-events:none;
-    opacity:0;transition:opacity .9s ease;
-    background-image:radial-gradient(112% 86% at 50% 42%, transparent 40%, rgba(0,0,0,.62) 100%),
-      url('/arena/hall.jpg');
-    background-size:cover,cover;background-position:center,center 42%;
-    background-repeat:no-repeat,no-repeat}
-  .arena.lights-down .ring .backdrop{opacity:1}
+     ruszają (CLAUDE.md § Sędzia). Teraz jest tłem całej areny (`.cage-bg`),
+     nie tylko wnętrza ringu — stąd `.ring .backdrop` zostaje pusty/niewidoczny,
+     żeby nie dublować tej samej grafiki dwa razy. */
+  .ring .backdrop{display:none}
 
   /* Słupki narożne: liny muszą się o coś opierać. */
   .ring .ropes::before,.ring .ropes::after{content:'';position:absolute;top:-.5rem;bottom:-.5rem;
@@ -429,6 +461,5 @@
 
   @media (prefers-reduced-motion:reduce){
     .arena{transition:none}
-    .ring .backdrop{transition:none}
     .fighter,.referee .ref-fig{animation:none}
   }
