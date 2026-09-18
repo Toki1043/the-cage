@@ -121,6 +121,78 @@ check(
 )
 delete process.env.TRACKED_WALLETS
 
+console.log('\n== RPC: kolejność i nazwany błąd ==')
+{
+  const PONS = '0x39dbed3a2bd333467115de45665cc57f813c4571'
+  const realFetch = globalThis.fetch
+  const realWarn = console.warn
+  console.warn = () => {}
+  process.env.TRACKED_WALLETS = `${W1},${W2}`
+  process.env.ALCHEMY_RPC_URL_4663 = 'http://rpc.test/key-that-must-not-leak'
+
+  // Podstawiony RPC. `plan` mówi, jakim statusem odpowiada na kolejne
+  // wywołania dla danego tokena; po wyczerpaniu planu odpowiada 200
+  // z niezerowym saldem. Liczy też, ile wywołań leciało naraz.
+  const stub = (plan: Record<string, number[]>) => {
+    const calls: Record<string, number> = {}
+    let inFlight = 0
+    let maxInFlight = 0
+    globalThis.fetch = (async (_url: unknown, init: { body: string }) => {
+      const body = JSON.parse(init.body) as { params: [{ to: string }] }[]
+      const token = body[0].params[0].to
+      const n = (calls[token] = (calls[token] ?? 0) + 1)
+      inFlight++
+      maxInFlight = Math.max(maxInFlight, inFlight)
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      inFlight--
+      const status = plan[token]?.[n - 1] ?? 200
+      if (status !== 200) return new Response('nope', { status })
+      const result = '0x' + '0'.repeat(63) + '1'
+      return Response.json(body.map((_, id) => ({ jsonrpc: '2.0', id, result })))
+    }) as typeof fetch
+    return { calls, maxInFlight: () => maxInFlight }
+  }
+  const run = (a: string, b: string) =>
+    trackedWallets(
+      { address: a, networkId: 4663, symbol: 'AI' },
+      { address: b, networkId: 4663, symbol: 'PONS' },
+    )
+
+  let rpc = stub({})
+  let out = await run(TOKEN, PONS)
+  check('bez błędów: obie liczby', [out.a, out.b, out.note], [2, 2, null])
+  check('tokeny po kolei, nigdy dwa wywołania naraz', rpc.maxInFlight(), 1)
+
+  // 429 nie jest ponawiane: to jedna próba, a `null` z nazwanym zawodnikiem.
+  rpc = stub({ [PONS]: [429] })
+  out = await run(TOKEN, PONS)
+  check('429: null, nie zero', [out.a, out.b], [2, null])
+  check('jedna próba, bez ponowień', rpc.calls[PONS], 1)
+  check('notatka nazywa zawodnika', out.note, 'Blue corner (PONS): RPC returned 429.')
+
+  rpc = stub({ [TOKEN]: [500] })
+  out = await run(TOKEN, PONS)
+  check('czerwony nazwany, niebieski policzony', [out.a, out.b, out.note], [null, 2, 'Red corner (AI): RPC returned 500.'])
+
+  rpc = stub({ [TOKEN]: [429], [PONS]: [429] })
+  out = await run(TOKEN, PONS)
+  check('oba zawiodły: oba w notatce', out.note, 'Red corner (AI): RPC returned 429. Blue corner (PONS): RPC returned 429.')
+  check('adres RPC ani klucz nie wyciekają', JSON.stringify(out).includes('key-that-must-not-leak'), false)
+
+  // Symbol wpisuje deployer — do notatki nie może wejść nic poza znakami tickera.
+  rpc = stub({ [TOKEN]: [500] })
+  out = await trackedWallets(
+    { address: TOKEN, networkId: 4663, symbol: '<img src=x onerror=1>' },
+    { address: PONS, networkId: 4663 },
+  )
+  check('symbol z HTML-a oczyszczony', out.note, 'Red corner (imgsrcxonerror1): RPC returned 500.')
+
+  globalThis.fetch = realFetch
+  console.warn = realWarn
+  delete process.env.TRACKED_WALLETS
+  delete process.env.ALCHEMY_RPC_URL_4663
+}
+
 console.log('\n== IP klienta ==')
 const headers = (entries: Record<string, string>) => new Headers(entries)
 check('pierwszy wpis z x-forwarded-for', clientIp(headers({ 'x-forwarded-for': '1.2.3.4, 5.6.7.8' })), '1.2.3.4')

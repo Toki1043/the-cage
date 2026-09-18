@@ -250,6 +250,17 @@ const UNCONFIGURED: TrackedWallets = {
 export interface TrackedToken {
   address: string
   networkId: number
+  /** Do notatki o błędzie: żeby było widać, którego zawodnika nie dało się sprawdzić. */
+  symbol?: string
+}
+
+/**
+ * „Red corner (AI)". Symbol wpisuje deployer, więc do notatki idzie
+ * oczyszczony tak samo jak w `tick()` we froncie, a bez niego — sama strona.
+ */
+function cornerLabel(corner: 'Red' | 'Blue', token: TrackedToken): string {
+  const symbol = (token.symbol ?? '').replace(/[^A-Za-z0-9._-]/g, '').slice(0, 16)
+  return symbol ? `${corner} corner (${symbol})` : `${corner} corner`
 }
 
 /**
@@ -295,12 +306,26 @@ export async function trackedWallets(
     return { ...base, note: `Set ${missing.map(rpcUrlEnvName).join(' and ')} to check balances.` }
   }
 
-  const [countA, countB] = await Promise.all([
-    countHolding(process.env[rpcUrlEnvName(a.networkId)]!, a.address, list.wallets),
-    countHolding(process.env[rpcUrlEnvName(b.networkId)]!, b.address, list.wallets),
-  ])
+  // Po kolei, nie `Promise.all`: dwie paczki naraz na publicznym RPC Robinhood
+  // kończyły się 429 dla jednej z nich. Na RPC z kluczem Alchemy limit nie
+  // przeszkadza (sprawdzone: 1200 wywołań w <1 s, sześć paczek naraz, bez 429),
+  // więc ponowień ani cache'u tu nie ma.
+  const countA = await countHolding(
+    process.env[rpcUrlEnvName(a.networkId)]!,
+    a.address,
+    list.wallets,
+  )
+  const countB = await countHolding(
+    process.env[rpcUrlEnvName(b.networkId)]!,
+    b.address,
+    list.wallets,
+  )
 
-  const failure = 'error' in countA ? countA.error : 'error' in countB ? countB.error : null
+  // Jedno zdanie na każdego zawodnika, który zawiódł — nie tylko pierwszego.
+  const failures: string[] = []
+  if ('error' in countA) failures.push(`${cornerLabel('Red', a)}: ${countA.error}`)
+  if ('error' in countB) failures.push(`${cornerLabel('Blue', b)}: ${countB.error}`)
+  const failure = failures.length > 0 ? failures.join(' ') : null
   if (failure) console.warn('[tracked] nie udało się policzyć obserwowanych portfeli:', failure)
 
   return {

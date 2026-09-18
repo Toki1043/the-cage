@@ -937,9 +937,9 @@ export default function Home() {
           pasek, pod spodem — tylko z-index ratował klikalność przycisku. */}
       <div className="topbar">
         <header className="termbar">
-          <div className="term-field red">
-            <label htmlFor="a-addr">RED_CONTRACT</label>
-            <input id="a-addr" autoComplete="off" spellCheck={false} placeholder="0x…" />
+          <div className="addr-row">
+            <AddressField side="a" />
+            <AddressField side="b" />
           </div>
           <div className="term-actions">
             <button className="chip" type="button" onClick={loadSample}>
@@ -948,10 +948,6 @@ export default function Home() {
             <button className="term-go" id="go" type="button" onClick={go}>
               Make the fight
             </button>
-          </div>
-          <div className="term-field blue">
-            <label htmlFor="b-addr">BLUE_CONTRACT</label>
-            <input id="b-addr" autoComplete="off" spellCheck={false} placeholder="0x…" />
           </div>
         </header>
 
@@ -1060,6 +1056,72 @@ export default function Home() {
           <span>Entertainment. A token that wins a fight is still a token.</span>
         </footer>
       </aside>
+    </div>
+  )
+}
+
+/** `0x2e8c31…111e18` → `0x2e8c…111e18`. Puste, gdy nie ma czego skracać. */
+function shortAddress(value: string): string {
+  const v = value.trim()
+  return v.length > 13 ? `${v.slice(0, 6)}…${v.slice(-6)}` : ''
+}
+
+/**
+ * Pole adresu w karcie narożnika. `<input id="{side}-addr">` dalej trzyma
+ * PEŁNY adres i to z niego czyta `go()` — skrót jest wyłącznie warstwą
+ * wyświetlania: CSS chowa tekst inputu i rysuje `data-short` z `::after`,
+ * dopóki pole nie ma fokusu. Po kliknięciu wraca pełny adres.
+ *
+ * `loadSample()` ustawia `.value` bez żadnego zdarzenia, więc samo
+ * nasłuchiwanie `input` nie złapie próbki. Zamiast dokładać wywołanie do
+ * tamtej funkcji, opakowujemy setter `value` na tym jednym elemencie.
+ */
+function AddressField({ side }: { side: Side }) {
+  const box = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const boxNode = box.current
+    const input = boxNode?.querySelector('input')
+    if (!boxNode || !input) return
+
+    const sync = () => {
+      const short = shortAddress(input.value)
+      if (short) boxNode.setAttribute('data-short', short)
+      else boxNode.removeAttribute('data-short')
+    }
+
+    const own = Object.getOwnPropertyDescriptor(input, 'value')
+    const base = own ?? Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')
+    if (base?.get && base.set) {
+      const { get, set } = base
+      Object.defineProperty(input, 'value', {
+        configurable: true,
+        get() {
+          return get.call(this)
+        },
+        set(next: string) {
+          set.call(this, next)
+          sync()
+        },
+      })
+    }
+    input.addEventListener('input', sync)
+    sync()
+
+    return () => {
+      input.removeEventListener('input', sync)
+      if (own) Object.defineProperty(input, 'value', own)
+      else Reflect.deleteProperty(input, 'value')
+    }
+  }, [])
+
+  const red = side === 'a'
+  return (
+    <div className={`float-card ${red ? 'red' : 'blue'} addr-card`}>
+      <label htmlFor={`${side}-addr`}>{red ? 'RED_CORNER' : 'BLUE_CORNER'}</label>
+      <div className="addr-box" ref={box}>
+        <input id={`${side}-addr`} autoComplete="off" spellCheck={false} placeholder="0x…" />
+      </div>
     </div>
   )
 }
