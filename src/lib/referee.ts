@@ -41,6 +41,18 @@ export function holdersFailedCall(symbol: string, holders: number, minHolders: n
   )
 }
 
+/**
+ * Badania oblane na honeypocie. Sędzia ogłasza wynik skanu GoPlus i przypisuje
+ * go skanowi — nie wydaje własnej oceny kontraktu i nie mówi, że token jest
+ * oszustwem. Bez ostrzeżeń o inwestowaniu.
+ */
+export function honeypotFailedCall(symbol: string): string {
+  return (
+    `$${symbol} does not pass the pre-fight check: the GoPlus contract scan flags a honeypot, ` +
+    'meaning it reports that selling may be blocked. Withdrawn from the card.'
+  )
+}
+
 /** Obaj oblali badania — nie ma z kim walczyć. */
 export function fightCancelledCall(a: string, b: string): string {
   return `Both $${a} and $${b} fail the pre-fight check. No contest, the card is off.`

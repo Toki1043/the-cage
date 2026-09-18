@@ -8,6 +8,12 @@ import {
 } from './concentration.ts'
 import { holderGate, type HolderGate } from './holder-gate.ts'
 import {
+  fetchContractSecurity,
+  honeypotGate,
+  type ContractSecurity,
+  type HoneypotGate,
+} from './security.ts'
+import {
   computeChartModifiers,
   computeStats,
   computeVulnerability,
@@ -91,6 +97,14 @@ export interface TokenSnapshot {
    */
   concentration: Concentration
   /**
+   * Skan kontraktu z GoPlus: honeypot, mintable, blacklist, owner zmienia
+   * salda. Idzie do snapshotu jak każda inna liczba wejściowa — GoPlus też
+   * zmienia zdanie w czasie, a od honeypota zależy walkower, więc bez tego
+   * nie da się odtworzyć, czemu walka skończyła się bez rund. `checks: null`
+   * znaczy brak skanu, nie czysty kontrakt.
+   */
+  security: ContractSecurity
+  /**
    * Kapitalizacja podana przez Codex, tylko do audytu. Codex liczy ją z ceny
    * pary, którą sam sobie wybrał, więc dryfuje między zapytaniami. Do wagi
    * i statystyk idzie `marketCapUsd` policzone z ceny pary referencyjnej.
@@ -127,6 +141,8 @@ export interface TokenFightData {
   vulnerability: number
   /** Bramka na liczbie holderów — działa na darmowym planie, w przeciwieństwie do koncentracji. */
   holderGate: HolderGate
+  /** Bramka na honeypocie ze skanu GoPlus. Brak skanu przepuszcza; patrz `security.ts`. */
+  honeypotGate: HoneypotGate
   weightClass: WeightClass
   modifiers: ChartModifiers
   /**
@@ -486,15 +502,19 @@ async function fetchBars(
  * koncentracji podaży. Darmowy próg Codexu to 10 000 miesięcznie, więc mieści
  * się w tym około 1000 walk; przy większym ruchu potrzebny cache per token.
  * Patrz CLAUDE.md § Źródło danych.
+ *
+ * Do tego jedno zapytanie na token do GoPlus (publiczne, bez klucza, poza
+ * budżetem Codexu). Idzie równolegle z resztą i nigdy nie wywraca walki.
  */
 export async function fetchTokenFightData(
   address: string,
   networkId: number,
 ): Promise<TokenFightData> {
-  const [pairs, meta, holderBalances] = await Promise.all([
+  const [pairs, meta, holderBalances, security] = await Promise.all([
     fetchPairs(address, networkId),
     fetchTokenMeta(address, networkId),
     fetchHolderBalances(address, networkId),
+    fetchContractSecurity(address, networkId),
   ])
 
   if (pairs.length === 0) {
@@ -553,6 +573,7 @@ export async function fetchTokenFightData(
     circulatingSupply: meta.circulatingSupply,
     totalSupply: meta.totalSupply,
     concentration,
+    security,
     reportedMarketCapUsd: meta.reportedMarketCapUsd,
     marketCapDivergesFromReported: divergesFromReported(
       marketCapUsd,
@@ -579,6 +600,7 @@ export async function fetchTokenFightData(
     }),
     vulnerability: computeVulnerability(snapshot),
     holderGate: holderGate(snapshot.holders),
+    honeypotGate: honeypotGate(snapshot.security),
     weightClass: weightClass(snapshot.marketCapUsd),
     modifiers: computeChartModifiers(daily, hourly),
     concentration: concentrationVerdict(snapshot.concentration),

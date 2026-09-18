@@ -11,6 +11,7 @@ import { readBoard, readLeaderboard, readRecord, recordFight } from '../src/lib/
 import type { TokenFightData } from '../src/lib/codex.ts'
 import { concentrationUnavailable, concentrationVerdict } from '../src/lib/concentration.ts'
 import { holderGate } from '../src/lib/holder-gate.ts'
+import { honeypotGate, securityUnavailable } from '../src/lib/security.ts'
 import { computeStats, computeVulnerability, weightClass } from '../src/lib/stats.ts'
 
 let failed = 0
@@ -46,11 +47,13 @@ function token(
     stats: computeStats(raw),
     vulnerability: computeVulnerability(raw),
     holderGate: holderGate(raw.holders),
+    honeypotGate: honeypotGate(securityUnavailable(4663, 'test')),
     weightClass: weightClass(raw.marketCapUsd),
     concentration: concentrationVerdict(concentration),
     snapshot: {
       totalSupply: raw.marketCapUsd,
       concentration,
+      security: securityUnavailable(4663, 'test'),
       pairAddress: '0xpair' + symbol.toLowerCase(),
       pairBackingSymbol: 'WETH',
       pairExchange: 'test',
@@ -125,6 +128,7 @@ check('bez bazy magazyn jest nietrwały', first.persistent, false)
 check('zapisana walka ma wynik z symulacji', first.fight.winner, fight.winner)
 check('zapisana walka trzyma snapshot wejść', first.fight.sides.a.inputs.liquidityUsd, 2_130_000)
 check('snapshot trzyma obrót 24h, z którego liczy się siła', first.fight.sides.a.inputs.volume24hUsd, 800_000)
+check('snapshot trzyma skan GoPlus, od którego zależy walkower za honeypota', first.fight.sides.a.inputs.security?.source, 'goplus')
 check('zapisana walka trzyma statystyki', first.fight.sides.a.stats, AI.stats)
 
 console.log('\n== Idempotencja ==')

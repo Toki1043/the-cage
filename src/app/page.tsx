@@ -35,6 +35,7 @@ import {
   fightCancelledCall,
   glassJawCall,
   holdersFailedCall,
+  honeypotFailedCall,
   judgesCall,
   knockdownCall,
   knockoutCall,
@@ -45,6 +46,8 @@ import {
   walkoverCall,
 } from '@/lib/referee'
 import { count, ringsideRead, usd } from '@/lib/ringside'
+import type { SecurityChecks, SecurityFlag } from '@/lib/security'
+import { explainFight, type WhyCell } from '@/lib/why'
 
 /* ------------------------------------------------------------------ */
 /* Stałe                                                               */
@@ -145,11 +148,6 @@ const other = (side: Side): Side => (side === 'a' ? 'b' : 'a')
  */
 function tick(symbol: string): string {
   return symbol.replace(/[^A-Za-z0-9._-]/g, '').slice(0, 16) || 'UNNAMED'
-}
-
-/** Sekundy albo milisekundy — snapshot bywa zapisany i tak, i tak. */
-function toDate(stamp: number): Date {
-  return new Date(stamp > 1e12 ? stamp : stamp * 1000)
 }
 
 /* ------------------------------------------------------------------ */
@@ -336,19 +334,83 @@ function drawVerdict(data: FightApiResponse) {
   how.className = 'how'
   how.textContent = verdictLine(fight)
 
-  // Ziarno i czas snapshotu razem: bez snapshotu wyniku nie da się odtworzyć,
-  // bo dane z Codexu ruszają się w czasie (CLAUDE.md § Determinizm).
-  const seed = document.createElement('p')
-  seed.className = 'seed'
-  const taken = toDate(data.tokenA.snapshot.fetchedAt)
-  seed.textContent =
-    `Fight seed ${fight.seed.slice(0, 12)}… — these two contracts always fight this way. ` +
-    `Input snapshot taken ${taken.toISOString().slice(0, 16).replace('T', ' ')} UTC.`
-
-  box.append(headline, how, seed)
+  // Ziarno, czas snapshotu i zdanie o determinizmie mieszkają teraz w linii
+  // o źródle w panelu WHY (`why.ts`): ta sama treść dokładniej, bo mówi
+  // też, że dane z Codexu ruszają się w czasie (CLAUDE.md § Determinizm).
+  box.append(headline, how)
   const host = need('verdict-host')
   host.textContent = ''
   host.appendChild(box)
+}
+
+/* ------------------------------------------------------------------ */
+/* WHY — stała tabela, czysta arytmetyka                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Panel „WHY": każda statystyka obok surowej liczby, z której powstała,
+ * jedno zdanie liczone z tych liczb i linia o źródle.
+ *
+ * To nie jest komentarz: nic tu nie przechodzi przez model, a panel nie znika
+ * z ekranu po kilku sekundach jak kwestie komentatorów — zostaje do następnej
+ * walki. Cała treść przychodzi z `explainFight`. Tekst wchodzi przez
+ * `textContent`, nie przez `innerHTML`: symbol tokena wpisuje deployer.
+ */
+function whyCell(cell: WhyCell): HTMLTableCellElement {
+  const td = document.createElement('td')
+  if (cell.score !== null) {
+    const score = document.createElement('b')
+    score.textContent = String(cell.score)
+    const raw = document.createElement('span')
+    raw.textContent = ` ← ${cell.raw}`
+    td.append(score, raw)
+  } else {
+    td.textContent = cell.raw
+  }
+  if (cell.warn) td.classList.add('flag-detected')
+  return td
+}
+
+function setWhyOpen(open: boolean) {
+  need('why-body').hidden = !open
+  need('why-hint').textContent = open ? 'hide ▾' : 'show ▸'
+  need('why-toggle').setAttribute('aria-expanded', String(open))
+}
+
+function drawWhy(data: FightApiResponse) {
+  const why = explainFight(data)
+
+  const table = need('why-table') as HTMLTableElement
+  table.textContent = ''
+
+  const head = table.createTHead().insertRow()
+  const corner = document.createElement('th')
+  corner.scope = 'col'
+  corner.textContent = 'stat ← on-chain number'
+  const heads = (['a', 'b'] as const).map((side) => {
+    const th = document.createElement('th')
+    th.scope = 'col'
+    th.className = side === 'a' ? 'red' : 'blue'
+    th.textContent = `$${why.symbols[side]}`
+    return th
+  })
+  head.append(corner, ...heads)
+
+  const body = table.createTBody()
+  for (const row of why.rows) {
+    const tr = body.insertRow()
+    const label = document.createElement('th')
+    label.scope = 'row'
+    label.textContent = row.label
+    tr.append(label, whyCell(row.a), whyCell(row.b))
+  }
+
+  need('why-sentence').textContent = why.sentence
+  need('why-source').textContent = why.source
+  // Zwinięty po każdej walce: ring z wynikiem ma być widoczny od razu, a tabela
+  // czeka na kliknięcie. Otwarty stan poprzedniej walki się nie przenosi.
+  setWhyOpen(false)
+  need('why-panel').hidden = false
 }
 
 /* ------------------------------------------------------------------ */
@@ -515,6 +577,9 @@ function createRing(data: FightApiResponse, clock: Clock) {
     need('read-card-b').innerHTML = ''
     need('read-headline').hidden = true
     need('verdict-host').textContent = ''
+    // Tabela WHY też należy do poprzedniej walki.
+    need('why-panel').hidden = true
+    need('why-table').textContent = ''
     need('kostamp').hidden = true
 
     for (const side of ['a', 'b'] as const) {
@@ -552,9 +617,9 @@ function createRing(data: FightApiResponse, clock: Clock) {
     for (const event of data.fight.events) {
       switch (event.type) {
         // Badania przed pierwszym dzwonkiem. Zawodnik z zbyt małą liczbą
-        // holderów albo z koncentracją podaży od 70% w górę nie wchodzi do
-        // ringu — bez tych trzech gałęzi walkower byłby pustą animacją
-        // i werdyktem bez wyjaśnienia.
+        // holderów, z honeypotem wykrytym przez GoPlus albo z koncentracją
+        // podaży od 70% w górę nie wchodzi do ringu — bez tych trzech gałęzi
+        // walkower byłby pustą animacją i werdyktem bez wyjaśnienia.
         case 'medicalsFailed': {
           setRoundTag('Pre-fight check')
           panel.call = ''
@@ -563,7 +628,9 @@ function createRing(data: FightApiResponse, clock: Clock) {
           setRef(
             event.reason === 'holders'
               ? holdersFailedCall(symbols[event.fighter], event.holders, event.minHolders)
-              : medicalsFailedCall(symbols[event.fighter], event.concentrationPercent),
+              : event.reason === 'honeypot'
+                ? honeypotFailedCall(symbols[event.fighter])
+                : medicalsFailedCall(symbols[event.fighter], event.concentrationPercent),
           )
           refCue('talking', TIMING.instructions)
           await sleep(TIMING.instructions)
@@ -704,10 +771,58 @@ function fillTracked(data: FightApiResponse) {
   if (!tracked.configured) return
   note.textContent =
     tracked.a === null && tracked.b === null
-      ? 'Watched wallets could not be checked this round. The fight is unaffected either way.'
-      : 'Watched wallets: addresses from a private server-side list holding this contract. ' +
-        'A count, not a signal — nobody here is labelled smart money, and it changes nothing ' +
-        'about the fight.'
+      ? 'GOAT WALLETS could not be checked this round. The fight is unaffected either way.'
+      : 'GOAT WALLETS: addresses from a private server-side list holding this contract. ' +
+        'A count, not a signal — being on the list says nothing about what any wallet does ' +
+        'next, and it changes nothing about the fight.'
+}
+
+/**
+ * Skan kontraktu z GoPlus w obu narożnikach: pięć wierszy, trzy stany.
+ *
+ * Brak danych to „no data", nie „not detected": GoPlus potrafi znać adres i nie
+ * zwrócić żadnego z pól (WETH na Robinhood Chain), a puste pole czytane jak
+ * zero wyglądałoby jak czysty kontrakt. „Detected" idzie na złoto, nie na
+ * czerwień — czerwień to kolor narożnika.
+ *
+ * Nigdzie nie stoi słowo „safe". Honeypot zatrzymuje zawodnika (walkower), cztery
+ * pozostałe to ostrzeżenia i o wyniku nie decydują.
+ */
+const SECURITY_KEYS: readonly (keyof SecurityChecks)[] = [
+  'honeypot',
+  'mintable',
+  'blacklist',
+  'ownerCanChangeBalances',
+  'transferPausable',
+]
+
+const SECURITY_FLAG_TEXT: Record<SecurityFlag, string> = {
+  detected: 'detected',
+  not_detected: 'not detected',
+  unknown: 'no data',
+}
+
+function fillSecurity(data: FightApiResponse) {
+  const notes: string[] = []
+
+  for (const side of ['a', 'b'] as const) {
+    const token = side === 'a' ? data.tokenA : data.tokenB
+    // Karta otwarta przed wdrożeniem trafia na odpowiedź bez tego pola.
+    const security = token.snapshot.security ?? null
+    for (const key of SECURITY_KEYS) {
+      const flag: SecurityFlag = security?.checks?.[key] ?? 'unknown'
+      const cell = need(`${side}-sec-${key}`)
+      cell.textContent = SECURITY_FLAG_TEXT[flag]
+      cell.classList.toggle('flag-detected', flag === 'detected')
+    }
+    if (security?.note) notes.push(`$${tick(token.symbol)}: ${security.note}`)
+  }
+
+  need('security-note').textContent =
+    'Contract scan by GoPlus. “Not detected” means the scan did not find it, not that the ' +
+    'contract is safe; “no data” means the scan could not say. Only a honeypot changes the ' +
+    'fight — the other four are warnings.' +
+    (notes.length > 0 ? ` ${notes.join(' ')}` : '')
 }
 
 /**
@@ -832,6 +947,14 @@ export default function Home() {
   }
 
   /**
+   * Rozwija i zwija tabelę WHY. Domyślnie jest zwinięta do paska nagłówka, żeby
+   * po walce od razu było widać ring z wynikiem; rozwija się kliknięciem.
+   */
+  function toggleWhy() {
+    setWhyOpen(need('why-body').hidden)
+  }
+
+  /**
    * Ranking żyje w chowanej szufladzie z boku ekranu, żeby arena sama w sobie
    * została pełnoekranowa i bez przewijania strony.
    */
@@ -884,6 +1007,7 @@ export default function Home() {
       fillCorner('a', data.tokenA)
       fillCorner('b', data.tokenB)
       fillTracked(data)
+      fillSecurity(data)
       showMatchup(data)
       drawTape(data.tokenA, data.tokenB)
 
@@ -909,6 +1033,7 @@ export default function Home() {
       need('calls').innerHTML = ''
       drawRead(data.tokenA, data.tokenB)
       drawVerdict(data)
+      drawWhy(data)
 
       // Wynik jest już zapisany po stronie serwera — tu tylko przeciągamy
       // odświeżoną listę. Zapis jest idempotentny po parze adresów, więc
@@ -958,6 +1083,9 @@ export default function Home() {
         {/* Jedno zdanie pod oba narożniki, a nie po jednym w każdym: ta sama
             uwaga powtórzona dwa razy czyta się jak ostrzeżenie o czymś innym. */}
         <p className="tracked-note" id="tracked-note" hidden />
+        {/* Pokazywana dopiero po pierwszej walce: `fillSecurity` wypełnia ją
+            razem z narożnikami, a przed walką nie ma czego objaśniać. */}
+        <p className="tracked-note" id="security-note" />
       </div>
 
       <main className="stage-floor">
@@ -1024,11 +1152,39 @@ export default function Home() {
 
       {/* Sędzia: kwestie w trakcie walki i werdykt na końcu, w tej samej
           karcie na dole środkiem (CLAUDE.md § Sędzia — ogłasza, nie decyduje). */}
-      <div className="judge-panel" id="judge-panel">
-        <div className="calls" id="calls" />
-        <p className="read-headline" id="read-headline" hidden />
-        <div id="verdict-host" />
-        <p className="note-line" id="note" />
+      <div className="judge-dock">
+        {/* Stała tabela po walce, nad panelem sędziego. Nie jest komentarzem:
+            zostaje na ekranie do następnej walki i nie przechodzi przez model. */}
+        <section className="why-panel" id="why-panel" aria-labelledby="why-title" hidden>
+          {/* Cały pasek nagłówka jest przyciskiem: zwinięty panel to jedna,
+              szeroka strefa kliknięcia, a nie mały przycisk z boku. */}
+          <h3>
+            <button
+              className="why-head"
+              id="why-toggle"
+              type="button"
+              aria-expanded="false"
+              aria-controls="why-body"
+              onClick={toggleWhy}
+            >
+              <span id="why-title">WHY</span>
+              <span className="why-hint" id="why-hint">show ▸</span>
+            </button>
+          </h3>
+          <div id="why-body" hidden>
+            <div className="why-scroll">
+              <table className="why-table" id="why-table" />
+            </div>
+            <p className="why-sentence" id="why-sentence" />
+            <p className="why-source" id="why-source" />
+          </div>
+        </section>
+        <div className="judge-panel" id="judge-panel">
+          <div className="calls" id="calls" />
+          <p className="read-headline" id="read-headline" hidden />
+          <div id="verdict-host" />
+          <p className="note-line" id="note" />
+        </div>
       </div>
 
       <button
@@ -1155,11 +1311,34 @@ function CornerCard({ side }: { side: Side }) {
           <dt>Pair age</dt>
           <dd id={`${side}-age`}>—</dd>
         </div>
+        {/* Skan GoPlus: pięć wierszy na całą szerokość, żeby „not detected"
+            i „no data" nie łamały się w połówce karty. Karta jest schowana do
+            pierwszej walki, więc puste „—" nigdy nie jest widoczne. */}
+        <div className="wide">
+          <dt>Honeypot</dt>
+          <dd id={`${side}-sec-honeypot`}>—</dd>
+        </div>
+        <div className="wide">
+          <dt>Mintable</dt>
+          <dd id={`${side}-sec-mintable`}>—</dd>
+        </div>
+        <div className="wide">
+          <dt>Blacklist</dt>
+          <dd id={`${side}-sec-blacklist`}>—</dd>
+        </div>
+        <div className="wide">
+          <dt>Owner can edit balances</dt>
+          <dd id={`${side}-sec-ownerCanChangeBalances`}>—</dd>
+        </div>
+        <div className="wide">
+          <dt>Transfers pausable</dt>
+          <dd id={`${side}-sec-transferPausable`}>—</dd>
+        </div>
         {/* Wiersz na całą szerokość i domyślnie schowany: bez listy
             obserwowanych portfeli po stronie serwera nie ma tu czego
             pokazać, a puste pole czyta się jak zero trafień. */}
         <div className="wide" id={`${side}-tracked-row`} hidden>
-          <dt>Watched wallets</dt>
+          <dt>GOAT WALLETS</dt>
           <dd id={`${side}-tracked`}>—</dd>
         </div>
       </dl>

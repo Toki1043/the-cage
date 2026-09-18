@@ -19,6 +19,7 @@
 
 import type { TokenFightData } from './codex'
 import type { FightResult, Side } from './fight'
+import type { ContractSecurity } from './security'
 import type { FightStats, WeightClassId } from './stats'
 // Rozszerzenia `.ts` w importach wykonywanych w czasie działania: bez nich
 // `node --experimental-strip-types` nie rozwiąże ścieżki, a na tym stoją
@@ -70,6 +71,13 @@ export interface RecordedInputs {
   top10Percent: number | null
   /** Czy pasmo koncentracji miało wpływ na tę walkę. */
   concentrationEnforced: boolean
+  /**
+   * Skan GoPlus, na którym stanęła bramka na honeypocie. Bez niego walkower za
+   * honeypota jest nie do zweryfikowania — GoPlus zmienia zdanie w czasie.
+   * Opcjonalne: rekordy sprzed skanu go nie mają, a brak pola to nie to samo
+   * co `checks: null`.
+   */
+  security?: ContractSecurity
 }
 
 /** Rekord jednego kontraktu. */
@@ -132,6 +140,7 @@ function inputsOf(token: TokenFightData): RecordedInputs {
     pairAddress: token.snapshot.pairAddress,
     top10Percent: token.snapshot.concentration.top10Percent,
     concentrationEnforced: token.concentration.enforced,
+    security: token.snapshot.security,
   }
 }
 

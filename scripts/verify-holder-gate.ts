@@ -10,6 +10,7 @@
 import { simulateFight, type FighterInput, type FightEvent } from '../src/lib/fight.ts'
 import { concentrationUnavailable, concentrationVerdict } from '../src/lib/concentration.ts'
 import { MIN_HOLDERS, holderGate } from '../src/lib/holder-gate.ts'
+import { honeypotGate, securityUnavailable } from '../src/lib/security.ts'
 import { computeStats, computeVulnerability, type ChartModifiers } from '../src/lib/stats.ts'
 
 let failed = 0
@@ -55,6 +56,7 @@ function token(address: string, symbol: string, raw: Raw): FighterInput {
     modifiers,
     vulnerability: computeVulnerability(raw),
     holderGate: holderGate(raw.holders),
+    honeypotGate: honeypotGate(securityUnavailable(4663, 'test')),
     // Brak sald: pasmo `clear`, `enforced: false` — dzisiejsza odpowiedź na darmowym planie.
     concentration: concentrationVerdict(concentrationUnavailable(null, 'test')),
   }

@@ -276,6 +276,8 @@
   .float-card.tape-card dt{color:var(--ink-soft)}
   .float-card.tape-card dd{margin:0;font-variant-numeric:tabular-nums}
   .float-card.tape-card dl>div.wide{grid-column:1/-1}
+  .float-card.tape-card dd.flag-detected{color:var(--gold)}
+  .tracked-note:empty{display:none}
 
   .stat-rows{margin-top:.65rem;border-top:1px solid var(--rule);padding-top:.55rem}
   .stat-row{display:grid;grid-template-columns:3.6rem 1fr 1.6rem;align-items:center;gap:.4rem;
@@ -319,6 +321,9 @@
     .side-stack.left,.side-stack.right{align-items:stretch}
     .float-card{max-width:calc(50% - .4rem)}
     .judge-panel{position:static;transform:none;width:100%;margin-top:.75rem;max-width:none}
+    .judge-dock{position:static;transform:none;width:100%;margin-top:.75rem}
+    .judge-dock .judge-panel{width:100%}
+    .why-panel{max-height:none}
   }
 
   /* ---------- panel sędziego: kwestie + werdykt, na dole środkiem ---------- */
@@ -330,6 +335,45 @@
     width:min(90vw,34rem);max-height:26vh;overflow-y:auto;background:rgba(6,14,12,.85);border:1px solid var(--gold);
     border-radius:3px;padding:.7rem .9rem;box-shadow:0 0 16px rgba(255,210,63,.18),inset 0 0 18px rgba(255,210,63,.05);
     font-family:var(--font-term)}
+  /* Pojemnik na dole środkiem: tabela WHY nad panelem sędziego, jedno pod
+     drugim, żeby żadne nie zasłaniało drugiego. Sam nie łapie kliknięć — ring
+     pod nim zostaje klikalny tam, gdzie pojemnik jest pusty. */
+  .judge-dock{position:absolute;left:50%;bottom:1rem;transform:translateX(-50%);z-index:31;
+    width:min(94vw,46rem);display:flex;flex-direction:column;align-items:center;gap:.5rem;
+    pointer-events:none}
+  .judge-dock > *{pointer-events:auto}
+  .judge-dock .judge-panel{position:static;transform:none;width:min(100%,34rem)}
+
+  /* Nad paskiem górnym (z-index 30), z nieprzezroczystym tłem: inaczej notatki
+     spod paska prześwitują przez tabelę i nachodzą na jej nagłówek. Limit
+     wysokości zostawia przycisk „Make the fight" w spokoju; źródło na dole ma
+     być widoczne, więc limit jest szczodry, a przewija się dopiero za nim. */
+  .why-panel{width:100%;max-height:max(12rem,calc(100dvh - 26rem));overflow-y:auto;background:rgb(6,14,12);
+    border:1px solid var(--rule);border-radius:3px;padding:.6rem .8rem;font-family:var(--font-term)}
+  .why-panel h3{margin:0}
+  .why-head{display:flex;align-items:center;justify-content:space-between;gap:.5rem;width:100%;
+    background:none;border:0;padding:0;margin:0;cursor:pointer;color:inherit;font:inherit;text-align:left}
+  .why-head #why-title{font-family:var(--font-pixel),var(--font-anton),Impact,sans-serif;font-weight:400;
+    font-size:.68rem;letter-spacing:.06em;color:var(--gold)}
+  .why-head .why-hint{font-family:var(--font-term);font-size:.65rem;color:var(--ink-soft)}
+  .why-head:hover .why-hint,.why-head:focus-visible .why-hint{color:var(--gold)}
+  #why-body[hidden]{display:none}
+  #why-body:not([hidden]){margin-top:.4rem}
+  .why-panel[hidden]{display:none}
+  .why-scroll{overflow-x:auto}
+  .why-table{width:100%;border-collapse:collapse;font-size:.7rem;font-variant-numeric:tabular-nums}
+  .why-table th,.why-table td{padding:.18rem .4rem;border-bottom:1px dotted var(--rule);
+    text-align:left;vertical-align:top;overflow-wrap:anywhere}
+  .why-table thead th{font-weight:400;color:var(--ink-soft);border-bottom:1px solid var(--rule)}
+  .why-table thead th.red{color:var(--red)}
+  .why-table thead th.blue{color:var(--blue)}
+  .why-table tbody th{font-weight:400;color:var(--ink-soft);white-space:nowrap}
+  .why-table td b{font-weight:700}
+  .why-table td span{color:var(--ink-soft)}
+  .why-table td.flag-detected{color:var(--gold)}
+  .why-sentence{margin:.55rem 0 0;font-size:.74rem;line-height:1.45}
+  .why-source{margin:.45rem 0 0;font-size:.62rem;line-height:1.4;color:var(--ink-soft);overflow-wrap:anywhere}
+
   .calls{min-height:2.2rem}
   .calls p{margin:0 0 .3rem;font-size:.85rem;overflow-wrap:anywhere}
   .calls p.col{margin:0;color:var(--ink-soft);font-size:.78rem;font-style:italic}
@@ -344,7 +388,6 @@
   .verdict .w{font-family:var(--font-anton),Impact,sans-serif;font-size:clamp(1.1rem,4vw,1.6rem);
     text-transform:uppercase;line-height:1;margin:0}
   .verdict .how{color:var(--ink-soft);font-size:.8rem;margin:.4rem 0 0}
-  .verdict .seed{color:var(--ink-soft);font-size:.66rem;margin:.55rem 0 0}
   .note-line{margin:.4rem 0 0;font-size:.66rem;color:var(--ink-soft);text-align:center}
   .note-line:empty{display:none}
 

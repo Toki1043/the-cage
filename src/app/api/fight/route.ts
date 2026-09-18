@@ -38,6 +38,13 @@ const RATE_LIMIT = { limit: 10, windowSeconds: 60 }
  * z ziarna policzonego z obu adresów. Bez modelu językowego — komentarz i
  * sędzia dochodzą osobno i dostają gotowy rezultat.
  *
+ * Każdy token przechodzi też skan GoPlus (publiczny, bez klucza): honeypot,
+ * mintable, blacklist, owner zmienia salda, transfery do wstrzymania. Honeypot to bramka jak liczba
+ * holderów — walkower, bez rund. Cztery pozostałe to ostrzeżenia w narożniku
+ * i wyniku nie ruszają. Gdy GoPlus nie zna sieci albo nie odpowiada, skan
+ * wraca jako `checks: null` z notatką, a walka idzie normalnie: brak danych
+ * nie jest zaświadczeniem o czystości kontraktu.
+ *
  * Osobno, obok walki i bez wpływu na nią, idzie licznik obserwowanych
  * portfeli: ile adresów z serwerowej listy `TRACKED_WALLETS` trzyma każdego
  * z tokenów. Wychodzi wyłącznie liczba — nigdy adresy i nigdy sama lista.

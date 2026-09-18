@@ -12,6 +12,7 @@ import {
 } from '../src/lib/fight.ts'
 import { concentrationVerdict, type Concentration } from '../src/lib/concentration.ts'
 import { holderGate } from '../src/lib/holder-gate.ts'
+import { honeypotGate, securityUnavailable } from '../src/lib/security.ts'
 import type { ChartModifiers, FightStats } from '../src/lib/stats.ts'
 
 let failed = 0
@@ -78,6 +79,7 @@ const fighter = (
   modifiers: mods(over),
   vulnerability: extra.vulnerability ?? 0,
   holderGate: holderGate(extra.holders ?? 10_000),
+  honeypotGate: honeypotGate(securityUnavailable(4663, 'test')),
   concentration: concentrationVerdict(concentration),
 })
 
@@ -244,6 +246,7 @@ const bare: FighterInput = {
   modifiers: mods({ volatility: null, drawdownFromPeakClose: null, priceChange24h: null }),
   vulnerability: 0,
   holderGate: holderGate(10_000),
+  honeypotGate: honeypotGate(securityUnavailable(4663, 'test')),
   concentration: concentrationVerdict(conc()),
 }
 const bareFight = simulateFight(bare, AI)

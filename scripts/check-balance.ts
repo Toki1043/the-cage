@@ -10,6 +10,7 @@
 import { ROUNDS, simulateFight, type FighterInput, type FightMethod } from '../src/lib/fight.ts'
 import { concentrationUnavailable, concentrationVerdict } from '../src/lib/concentration.ts'
 import { holderGate } from '../src/lib/holder-gate.ts'
+import { honeypotGate, securityUnavailable } from '../src/lib/security.ts'
 import type { ChartModifiers } from '../src/lib/stats.ts'
 
 const COUNT = Number(process.argv[2] ?? 100)
@@ -53,6 +54,7 @@ function fighter(index: number, tag: 'a' | 'b'): FighterInput {
     // w `verify:fight`. Bramka przepuszcza: liczy się rozkład samych walk.
     vulnerability: Math.round(rnd() * 100),
     holderGate: holderGate(10_000),
+    honeypotGate: honeypotGate(securityUnavailable(4663, 'test')),
     concentration: clear,
   }
 }

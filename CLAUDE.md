@@ -97,6 +97,45 @@ Dokładnie 200 przechodzi. Gdy Codex nie zwróci liczby holderów, zapytanie ko�
 błędem, a nie walkowerem: zero z braku danych byłoby wynikiem wziętym znikąd.
 Zawodnik z obiema wadami dostaje jeden powód — holderów.
 
+## Skan kontraktu (GoPlus)
+
+Publiczny endpoint, bez klucza: `https://api.gopluslabs.io/api/v1/token_security/{chainId}?contract_addresses={adres}`.
+Robinhood Chain to chainId 4663, to samo id co w Codexie. Kod w `src/lib/security.ts`.
+
+Pięć pytań: honeypot, mintable, blacklist, czy właściciel może zmieniać salda
+i czy może wstrzymać transfery (`transfer_pausable`).
+
+- **Honeypot to bramka**, jak holderzy: zawodnik nie przechodzi badań i przegrywa
+  walkowerem, bez rund. Kolejność powodów przy kilku wadach: holderzy, honeypot,
+  koncentracja — jeden powód na osobę.
+- **Pozostałe cztery to ostrzeżenia** w narożniku. Nie wchodzą do symulacji.
+- **Każde sprawdzenie ma trzy stany**: wykryto / nie wykryto / brak danych. GoPlus
+  potrafi znać adres i nie zwrócić żadnego z pól (WETH na 4663), więc brak pola
+  nigdy nie jest zerem.
+- **Brak skanu (sieć nieobsługiwana, adres nieznany, timeout, błąd) to `null`
+  z notatką**, a walka idzie normalnie. Walkower za to, że GoPlus nie odpowiedział,
+  byłby wynikiem wziętym znikąd.
+- Nigdy nie pisz, że token jest bezpieczny. „Nie wykryto" znaczy, że skan czegoś
+  nie znalazł. Skan idzie do snapshotu (`snapshot.security`) i do rankingu.
+- Model tych flag nie widzi.
+
+## Panel „WHY"
+
+Stała tabela po walce, do następnej walki. Domyślnie zwinięta do paska nagłówka
+(ring z wynikiem ma być widoczny od razu), rozwijana kliknięciem. Nie jest komentarzem: cała treść to
+arytmetyka i szablony w `src/lib/why.ts`, bez udziału modelu.
+
+- Każda statystyka obok surowej liczby, z której powstała: wytrzymałość ← płynność,
+  siła ← obrót 24h, garda ← holderzy, szybkość ← wiek pary, podatność ← kapitalizacja
+  ÷ płynność jako krotność. Do tego obserwowane portfele i wynik skanu GoPlus.
+- Jedno zdanie liczone z tych liczb: przy walce największa przewaga i największy deficyt
+  zwycięzcy, przy walkowerze powód z zapisanego zdarzenia badań. Zdanie mówi wprost, że
+  ciosy idą z ziarna, więc różnice w statystykach przechylają walkę, ale jej nie przesądzają.
+- Linia o źródle: skąd dane, znacznik czasu snapshotu, ziarno i informacja, że wynik jest
+  deterministyczny dla tej pary na tym snapshocie. Dane się ruszają, więc nie pisz, że
+  te dwa kontrakty „zawsze walczą tak samo".
+- Bez „safe", „smart money" i prognoz. `verify:why` pilnuje tych słów.
+
 ## Kategorie wagowe
 
 Kapitalizacja nie jest statystyką bojową — wyznacza **kategorię wagową**.
@@ -144,6 +183,11 @@ Skuteczność portfela (opcjonalnie, tylko na zamkniętych pozycjach) pokazuj
 **surowo**: "trafił 4 z 19". Nigdy jako etykietę "smart money", "alfa" ani
 podobną. Portfel z serią trafień to najczęściej szczęściarz widoczny właśnie
 dlatego, że trafił — pozostałych nikt nie zindeksował. To błąd przeżywalności.
+
+Wyjątek z decyzji właściciela: licznik portfeli z prywatnej listy `TRACKED_WALLETS`
+nazywa się w UI **GOAT WALLETS**. To nazwa listy, nie ocena: zostaje samym licznikiem
+("3 of 40"), z notatką, że to nie sygnał i niczego nie mówi o przyszłych ruchach portfela.
+Reguła powyżej dalej obowiązuje dla skuteczności portfela — żadnych etykiet z wyniku.
 
 Budżet zapytań: darmowy próg Codexu to 10 000 miesięcznie. Historia handlu
 50 holderów × 2 tokeny to ponad 100 zapytań na walkę. Dlatego: top 10, wyniki

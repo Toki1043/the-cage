@@ -21,6 +21,7 @@ import { combatProfile, simulateFight, type FighterInput } from '../src/lib/figh
 import { recordFight } from '../src/lib/leaderboard.ts'
 import type { TokenFightData } from '../src/lib/codex.ts'
 import { holderGate } from '../src/lib/holder-gate.ts'
+import { honeypotGate, securityUnavailable } from '../src/lib/security.ts'
 import { computeStats, computeVulnerability, weightClass, type ChartModifiers } from '../src/lib/stats.ts'
 
 let failed = 0
@@ -229,6 +230,7 @@ function fighter(address: string, symbol: string, percent: number | null): Fight
     // sprawdza koncentrację, a nie te dwie mechaniki.
     vulnerability: 0,
     holderGate: holderGate(10_000),
+    honeypotGate: honeypotGate(securityUnavailable(4663, 'test')),
     concentration: concentrationVerdict(at(percent)),
   }
 }
@@ -314,10 +316,12 @@ function tokenData(f: FighterInput, percent: number | null): TokenFightData {
     stats: computeStats(raw),
     vulnerability: computeVulnerability(raw),
     holderGate: holderGate(raw.holders),
+    honeypotGate: honeypotGate(securityUnavailable(4663, 'test')),
     weightClass: weightClass(raw.marketCapUsd),
     concentration: concentrationVerdict(concentration),
     modifiers: mods,
     snapshot: {
+      security: securityUnavailable(4663, 'test'),
       pairAddress: PAIR_A,
       pairBackingSymbol: 'WETH',
       pairExchange: 'test',

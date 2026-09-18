@@ -13,6 +13,7 @@
  */
 import type { ConcentrationVerdict } from './concentration'
 import type { HolderGate } from './holder-gate'
+import type { HoneypotGate } from './security'
 import type { ChartModifiers, FightStats } from './stats'
 
 /** Trzy rundy — patrz CLAUDE.md § Sędzia. */
@@ -36,6 +37,12 @@ export interface FighterInput {
    * statystyki. Działa na darmowym planie Codexu.
    */
   holderGate: HolderGate
+  /**
+   * Bramka na honeypocie z GoPlus. Wykryty — walkower, bez względu na
+   * statystyki. Brak danych ze skanu przepuszcza (`security.ts`). Cztery pozostałe
+   * flagi skanu nie wchodzą do symulacji.
+   */
+  honeypotGate: HoneypotGate
   /**
    * Pasmo koncentracji podaży, policzone po odsianiu adresów niebędących
    * holderami. `enforced: false` znaczy, że odsiewu nie dało się zrobić —
@@ -352,15 +359,17 @@ export function combatProfile(fighter: FighterInput): CombatProfile {
 /* ------------------------------------------------------------------ */
 
 /** Dlaczego zawodnik nie przeszedł badań. */
-export type MedicalFailure = 'holders' | 'concentration'
+export type MedicalFailure = 'holders' | 'honeypot' | 'concentration'
 
 export type FightEvent =
   /**
    * Badania przed walką: zawodnik nie wchodzi do ringu. Nie ma tu losowania —
-   * wynik wyszedł z liczby. Dwa powody: mniej holderów niż próg (`holders`)
-   * albo koncentracja podaży od 70% w górę (`concentration`).
+   * wynik wyszedł z liczby albo ze skanu. Trzy powody: mniej holderów niż próg
+   * (`holders`), honeypot wykryty przez GoPlus (`honeypot`) albo koncentracja
+   * podaży od 70% w górę (`concentration`).
    */
   | { type: 'medicalsFailed'; fighter: Side; reason: 'holders'; holders: number; minHolders: number }
+  | { type: 'medicalsFailed'; fighter: Side; reason: 'honeypot' }
   | { type: 'medicalsFailed'; fighter: Side; reason: 'concentration'; concentrationPercent: number }
   /** Obaj oblali badania — nie ma z kim walczyć, walka odwołana. */
   | { type: 'fightCancelled'; reasons: Record<Side, MedicalFailure> }
@@ -438,6 +447,8 @@ export interface FightResult {
   medicals: Record<Side, ConcentrationVerdict>
   /** Wynik bramki na holderach obu stron — z liczbą, z której wyszedł. */
   holderGates: Record<Side, HolderGate>
+  /** Wynik bramki na honeypocie obu stron — ze statusem skanu, z którego wyszedł. */
+  honeypotGates: Record<Side, HoneypotGate>
   events: FightEvent[]
 }
 
@@ -488,18 +499,23 @@ export function simulateFight(fighterA: FighterInput, fighterB: FighterInput): F
 
   const medicals = bySide([fighters[0].concentration, fighters[1].concentration])
   const holderGates = bySide([fighters[0].holderGate, fighters[1].holderGate])
+  const honeypotGates = bySide([fighters[0].honeypotGate, fighters[1].honeypotGate])
 
   // Badania przed pierwszym dzwonkiem. Zawodnik, który ich nie przejdzie, nie
-  // wchodzi do ringu — nie ma tu ani losowania, ani wyboru, tylko liczba:
+  // wchodzi do ringu — nie ma tu ani losowania, ani wyboru, tylko liczba
+  // albo wynik skanu:
   //
   //  1. Liczba holderów poniżej progu. Działa zawsze, bo Codex podaje ją za
   //     darmo. Sprawdzana pierwsza: to twardsza bramka, bo nie zależy od planu.
-  //  2. Koncentracja podaży od 70% w górę, policzona na saldach po odsiewie.
+  //  2. Honeypot wykryty przez GoPlus. Brak odpowiedzi skanu przepuszcza —
+  //     walkower za brak danych byłby wynikiem wziętym znikąd (`security.ts`).
+  //  3. Koncentracja podaży od 70% w górę, policzona na saldach po odsiewie.
   //     Bez odsiewu pasmo jest `clear` i ta bramka przepuszcza (`concentration.ts`).
   //
-  // Zawodnik z obiema wadami dostaje pierwszą z nich — jeden powód na osobę.
+  // Zawodnik z kilkoma wadami dostaje pierwszą z nich — jeden powód na osobę.
   const failure = (f: FighterInput): MedicalFailure | null => {
     if (!f.holderGate.passed) return 'holders'
+    if (!f.honeypotGate.passed) return 'honeypot'
     if (f.concentration.enforced && f.concentration.band === 'failed') return 'concentration'
     return null
   }
@@ -514,6 +530,7 @@ export function simulateFight(fighterA: FighterInput, fighterB: FighterInput): F
       bySide,
       medicals,
       holderGates,
+      honeypotGates,
       seed,
       seedKey: key,
     })
@@ -685,6 +702,7 @@ export function simulateFight(fighterA: FighterInput, fighterB: FighterInput): F
     damageDealt: bySide([round2(totalDamage[0]), round2(totalDamage[1])]),
     medicals,
     holderGates,
+    honeypotGates,
     events,
   }
 }
@@ -692,9 +710,10 @@ export function simulateFight(fighterA: FighterInput, fighterB: FighterInput): F
 /**
  * Wynik walki, której nie było: walkower albo odwołanie.
  *
- * Zawodnik nie wchodzi do ringu, gdy ma mniej holderów niż próg albo gdy
- * dziesięć portfeli — już po odsianiu pul płynności, adresu spalania i
- * kontraktu tokena — trzyma ponad dwie trzecie podaży dostępnej holderom.
+ * Zawodnik nie wchodzi do ringu, gdy ma mniej holderów niż próg, gdy GoPlus
+ * wykrył w jego kontrakcie honeypot albo gdy dziesięć portfeli — już po
+ * odsianiu pul płynności, adresu spalania i kontraktu tokena — trzyma ponad
+ * dwie trzecie podaży dostępnej holderom.
  * Gdy oblali obaj, nie ma z kim walczyć i nie ma zwycięzcy.
  *
  * Karta jest pusta, nie wyzerowana „na korzyść" kogokolwiek: walkower to brak
@@ -709,10 +728,11 @@ function noContest(input: {
   bySide: <T>(values: readonly [T, T]) => Record<Side, T>
   medicals: Record<Side, ConcentrationVerdict>
   holderGates: Record<Side, HolderGate>
+  honeypotGates: Record<Side, HoneypotGate>
   seed: string
   seedKey: string
 }): FightResult {
-  const { failures, fighters, profiles, side, bySide, medicals, holderGates, seed, seedKey } = input
+  const { failures, fighters, profiles, side, bySide, medicals, holderGates, honeypotGates, seed, seedKey } = input
   const percent = (i: 0 | 1) => fighters[i].concentration.percent ?? 0
 
   const events: FightEvent[] = []
@@ -726,6 +746,8 @@ function noContest(input: {
         holders: fighters[i].holderGate.holders,
         minHolders: fighters[i].holderGate.minHolders,
       })
+    } else if (reason === 'honeypot') {
+      events.push({ type: 'medicalsFailed', fighter: side(i), reason })
     } else if (reason === 'concentration') {
       events.push({
         type: 'medicalsFailed',
@@ -764,6 +786,7 @@ function noContest(input: {
     damageDealt: bySide([0, 0]),
     medicals,
     holderGates,
+    honeypotGates,
     events,
   }
 }
