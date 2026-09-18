@@ -755,26 +755,59 @@ function fillTracked(data: FightApiResponse) {
   // Karta otwarta przed wdrożeniem trafia na odpowiedź bez tego pola. Bez
   // zapasu rozpakowanie `undefined` wywraca cały przebieg walki na ozdobie.
   const tracked = data.tracked ?? { configured: false, watched: 0, a: null, b: null, note: null }
-  const note = need('tracked-note')
 
   for (const side of ['a', 'b'] as const) {
     const row = need(`${side}-tracked-row`)
     row.hidden = !tracked.configured
+    need(`${side}-goat-help`).hidden = true
+    need(`${side}-goat-help-btn`).setAttribute('aria-expanded', 'false')
     if (!tracked.configured) continue
     const held = side === 'a' ? tracked.a : tracked.b
     // Kreska, nie zero: nieudane sprawdzenie nie jest brakiem trafień.
     need(`${side}-tracked`).textContent =
       held === null ? '—' : `${count(held)} of ${count(tracked.watched)}`
+    need(`${side}-goat-note`).textContent =
+      held === null ? 'Could not be checked this round. The fight is unaffected either way.' : ''
   }
+}
 
-  note.hidden = !tracked.configured
-  if (!tracked.configured) return
-  note.textContent =
-    tracked.a === null && tracked.b === null
-      ? 'GOAT WALLETS could not be checked this round. The fight is unaffected either way.'
-      : 'GOAT WALLETS: addresses from a private server-side list holding this contract. ' +
-        'A count, not a signal — being on the list says nothing about what any wallet does ' +
-        'next, and it changes nothing about the fight.'
+/**
+ * Opisy schowane za „?" w karcie narożnika. Wcześniej były to dwie długie
+ * notatki na środku ekranu, przed walką, nachodzące na ring; opis jest
+ * potrzebny tylko temu, kto o niego zapyta.
+ */
+const SCAN_HELP =
+  'Contract scan by GoPlus. “Not detected” means the scan did not find it, not that the ' +
+  'contract is safe; “no data” means the scan could not say. Only a honeypot changes the ' +
+  'fight — the other four are warnings.'
+
+const GOAT_HELP =
+  'Addresses from a private server-side list holding this contract. A count, not a signal — ' +
+  'being on the list says nothing about what any wallet does next, and it changes nothing ' +
+  'about the fight.'
+
+/** Rozwija i zwija opis pod tabelką karty. Stan trzyma atrybut `hidden`, nie React. */
+function toggleHelp(button: HTMLElement, targetId: string) {
+  const text = need(targetId)
+  const open = text.hidden
+  text.hidden = !open
+  button.setAttribute('aria-expanded', String(open))
+}
+
+function HelpButton({ target, label }: { target: string; label: string }) {
+  return (
+    <button
+      className="help-btn"
+      id={`${target}-btn`}
+      type="button"
+      aria-label={label}
+      aria-expanded="false"
+      aria-controls={target}
+      onClick={(event) => toggleHelp(event.currentTarget, target)}
+    >
+      ?
+    </button>
+  )
 }
 
 /**
@@ -803,8 +836,6 @@ const SECURITY_FLAG_TEXT: Record<SecurityFlag, string> = {
 }
 
 function fillSecurity(data: FightApiResponse) {
-  const notes: string[] = []
-
   for (const side of ['a', 'b'] as const) {
     const token = side === 'a' ? data.tokenA : data.tokenB
     // Karta otwarta przed wdrożeniem trafia na odpowiedź bez tego pola.
@@ -815,14 +846,13 @@ function fillSecurity(data: FightApiResponse) {
       cell.textContent = SECURITY_FLAG_TEXT[flag]
       cell.classList.toggle('flag-detected', flag === 'detected')
     }
-    if (security?.note) notes.push(`$${tick(token.symbol)}: ${security.note}`)
+    // Notatka należy do tego tokena, więc leży w jego własnej karcie — nie ma
+    // potrzeby dopisywać do niej symbolu, jak we wspólnej notatce na środku.
+    need(`${side}-scan-note`).textContent = security?.note ?? ''
+    // Nowa walka zaczyna ze zwiniętym opisem.
+    need(`${side}-scan-help`).hidden = true
+    need(`${side}-scan-help-btn`).setAttribute('aria-expanded', 'false')
   }
-
-  need('security-note').textContent =
-    'Contract scan by GoPlus. “Not detected” means the scan did not find it, not that the ' +
-    'contract is safe; “no data” means the scan could not say. Only a honeypot changes the ' +
-    'fight — the other four are warnings.' +
-    (notes.length > 0 ? ` ${notes.join(' ')}` : '')
 }
 
 /**
@@ -1056,10 +1086,9 @@ export default function Home() {
           Bez osobnego ekranu startowego: to samo wejście leży na tle areny.
           `.topbar` jest jedynym elementem tu pozycjonowanym `absolute` —
           pasek i komunikaty pod nim płyną normalnie jeden pod drugim w jego
-          wnętrzu. Wcześniej `.termbar` był `position:absolute` SAM, więc jego
-          rodzeństwo (status/crossclass/tracked-note) nie miało czego się
-          trzymać w przepływie i renderowało się na tej samej wysokości co
-          pasek, pod spodem — tylko z-index ratował klikalność przycisku. */}
+          wnętrzu. Sam `.topbar` jest w przepływie siatki `.cage` (środkowa
+          kolumna, pierwszy wiersz `auto`), więc scena pod nim zaczyna się
+          zawsze pod jego prawdziwą dolną krawędzią. */}
       <div className="topbar">
         <header className="termbar">
           <div className="addr-row">
@@ -1080,12 +1109,9 @@ export default function Home() {
           Both corners fill themselves from the chain. Paste two contract addresses.
         </p>
         <p className="crossclass" id="crossclass" hidden />
-        {/* Jedno zdanie pod oba narożniki, a nie po jednym w każdym: ta sama
-            uwaga powtórzona dwa razy czyta się jak ostrzeżenie o czymś innym. */}
-        <p className="tracked-note" id="tracked-note" hidden />
-        {/* Pokazywana dopiero po pierwszej walce: `fillSecurity` wypełnia ją
-            razem z narożnikami, a przed walką nie ma czego objaśniać. */}
-        <p className="tracked-note" id="security-note" />
+        {/* Tu zostają tylko krótkie komunikaty. Długie opisy GOAT WALLETS i skanu
+            GoPlus mieszkają za „?" w karcie narożnika — na środku ekranu przed
+            walką nie ma dla nich miejsca. */}
       </div>
 
       <main className="stage-floor">
@@ -1311,9 +1337,15 @@ function CornerCard({ side }: { side: Side }) {
           <dt>Pair age</dt>
           <dd id={`${side}-age`}>—</dd>
         </div>
-        {/* Skan GoPlus: pięć wierszy na całą szerokość, żeby „not detected"
-            i „no data" nie łamały się w połówce karty. Karta jest schowana do
-            pierwszej walki, więc puste „—" nigdy nie jest widoczne. */}
+        {/* Skan GoPlus: nagłówek z „?" i pięć wierszy na całą szerokość, żeby
+            „not detected" i „no data" nie łamały się w połówce karty. Karta jest
+            schowana do pierwszej walki, więc puste „—" nigdy nie jest widoczne. */}
+        <div className="wide scan-head">
+          <dt>Contract scan · GoPlus</dt>
+          <dd>
+            <HelpButton target={`${side}-scan-help`} label="About the contract scan" />
+          </dd>
+        </div>
         <div className="wide">
           <dt>Honeypot</dt>
           <dd id={`${side}-sec-honeypot`}>—</dd>
@@ -1338,10 +1370,20 @@ function CornerCard({ side }: { side: Side }) {
             obserwowanych portfeli po stronie serwera nie ma tu czego
             pokazać, a puste pole czyta się jak zero trafień. */}
         <div className="wide" id={`${side}-tracked-row`} hidden>
-          <dt>GOAT WALLETS</dt>
+          <dt>
+            GOAT WALLETS <HelpButton target={`${side}-goat-help`} label="About GOAT WALLETS" />
+          </dt>
           <dd id={`${side}-tracked`}>—</dd>
         </div>
       </dl>
+      {/* Opisy za „?": zwinięte, dopóki ktoś o nie nie poprosi. Poza `<dl>`, bo
+          akapit nie jest dozwolonym dzieckiem listy opisowej. */}
+      <p className="corner-help" id={`${side}-scan-help`} hidden>
+        {SCAN_HELP} <span id={`${side}-scan-note`} />
+      </p>
+      <p className="corner-help" id={`${side}-goat-help`} hidden>
+        {GOAT_HELP} <span id={`${side}-goat-note`} />
+      </p>
       <div className="stat-rows" id={`stats-${side}`} />
     </div>
   )

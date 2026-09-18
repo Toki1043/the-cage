@@ -119,6 +119,19 @@ i czy może wstrzymać transfery (`transfer_pausable`).
   nie znalazł. Skan idzie do snapshotu (`snapshot.security`) i do rankingu.
 - Model tych flag nie widzi.
 
+## Układ ekranu
+
+Szkielet to siatka na `.cage`: trzy kolumny (karta czerwona | środek | karta niebieska)
+i dwa wiersze (pasek górny `auto`, scena `1fr`). Pasek górny i scena są w przepływie,
+więc nic w środku nie może na siebie nachodzić, jakkolwiek długi byłby tekst komunikatu.
+
+- Nie wracaj do stałej wysokości paska ani do `position:absolute` dla elementów z tekstem.
+  Ten błąd wracał już dwa razy: zgadnięta wartość rozjeżdża się z prawdziwą wysokością.
+- Długie opisy (GOAT WALLETS, skan GoPlus) nie leżą na środku ekranu, tylko za „?" w karcie
+  narożnika. Na środku zostają krótkie komunikaty.
+- Węższy niż 56rem wszystko układa się w jednej kolumnie i przewija się cały ekran.
+  Nadpisania mobilne muszą stać w pliku PO regułach bazowych, inaczej przegrywają kolejnością.
+
 ## Panel „WHY"
 
 Stała tabela po walce, do następnej walki. Domyślnie zwinięta do paska nagłówka
