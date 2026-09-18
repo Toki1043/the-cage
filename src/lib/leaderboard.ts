@@ -51,6 +51,16 @@ export interface RecordedInputs {
   fetchedAt: number
   /** Para referencyjna, z której wzięto płynność i cenę. */
   pairAddress: string
+  /**
+   * Koncentracja podaży po odsiewie, 0–100. `null`, gdy jej nie policzono.
+   *
+   * Idzie do rekordu, bo od niej zależy kara do wytrzymałości, szklana
+   * szczęka i walkower — bez niej nie da się odtworzyć, czemu walka skończyła
+   * się tak, jak się skończyła (CLAUDE.md § Determinizm).
+   */
+  top10Percent: number | null
+  /** Czy pasmo koncentracji miało wpływ na tę walkę. */
+  concentrationEnforced: boolean
 }
 
 /** Rekord jednego kontraktu. */
@@ -110,6 +120,8 @@ function inputsOf(token: TokenFightData): RecordedInputs {
     ageDays: token.snapshot.pairAgeDays,
     fetchedAt: token.snapshot.fetchedAt,
     pairAddress: token.snapshot.pairAddress,
+    top10Percent: token.snapshot.concentration.top10Percent,
+    concentrationEnforced: token.concentration.enforced,
   }
 }
 
@@ -136,6 +148,11 @@ function emptyRecord(token: TokenFightData): TokenRecord {
 export interface RecordOutcome {
   /** `false`, gdy ta walka była już zapisana — wtedy nic się nie zmieniło. */
   recorded: boolean
+  /**
+   * Czemu nic nie doszło: `duplicate` — ta para już walczyła,
+   * `cancelled` — obaj nie przeszli badań, więc walki nie było.
+   */
+  reason: 'duplicate' | 'cancelled' | null
   /** Czy zapis poszedł do realnej bazy, czy do pamięci procesu. */
   persistent: boolean
   fight: RecordedFight
@@ -169,10 +186,22 @@ export async function recordFight(
     settledAt: Math.floor(Date.now() / 1000),
   }
 
+  // Walka odwołana nie jest wynikiem i nie może ruszyć rankingu. Zapisanie
+  // jej jako remisu dałoby obu zawodnikom po punkcie za to, że nie weszli do
+  // ringu; zapisanie jako przegranej obu — dwie przegrane z nikim.
+  if (result.method === 'cancelled') {
+    return { recorded: false, reason: 'cancelled', persistent: isPersistent(), fight }
+  }
+
   const firstTime = await setIfAbsent(fightKey(result.seedKey), fight)
   if (!firstTime) {
     const stored = await getJson<RecordedFight>(fightKey(result.seedKey))
-    return { recorded: false, persistent: isPersistent(), fight: stored ?? fight }
+    return {
+      recorded: false,
+      reason: 'duplicate',
+      persistent: isPersistent(),
+      fight: stored ?? fight,
+    }
   }
 
   const crossClass = tokenA.weightClass.id !== tokenB.weightClass.id
@@ -181,7 +210,7 @@ export async function recordFight(
     applyResult(tokenB, result.winner === 'b', result.winner === 'a', result, crossClass),
   ])
 
-  return { recorded: true, persistent: isPersistent(), fight }
+  return { recorded: true, reason: null, persistent: isPersistent(), fight }
 }
 
 function side(token: TokenFightData): RecordedFight['sides']['a'] {

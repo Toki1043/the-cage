@@ -9,6 +9,7 @@
 import { simulateFight } from '../src/lib/fight.ts'
 import { readBoard, readLeaderboard, readRecord, recordFight } from '../src/lib/leaderboard.ts'
 import type { TokenFightData } from '../src/lib/codex.ts'
+import { concentrationUnavailable, concentrationVerdict } from '../src/lib/concentration.ts'
 import { computeStats, weightClass } from '../src/lib/stats.ts'
 
 let failed = 0
@@ -33,6 +34,9 @@ function token(
   symbol: string,
   raw: { liquidityUsd: number; marketCapUsd: number; holders: number; ageDays: number },
 ): TokenFightData {
+  // Koncentracji nie ma — tak jak na darmowym planie Codexu. Pasmo `clear`,
+  // zero wpływu na walkę; pasma sprawdza `verify:concentration`.
+  const concentration = concentrationUnavailable(null, 'test')
   return {
     address,
     name: symbol + ' token',
@@ -40,7 +44,10 @@ function token(
     networkId: 4663,
     stats: computeStats(raw),
     weightClass: weightClass(raw.marketCapUsd),
+    concentration: concentrationVerdict(concentration),
     snapshot: {
+      totalSupply: raw.marketCapUsd,
+      concentration,
       pairAddress: '0xpair' + symbol.toLowerCase(),
       pairBackingSymbol: 'WETH',
       pairExchange: 'test',

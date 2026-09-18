@@ -126,13 +126,24 @@ Zmiana ceny 24h jako modyfikator obrażeń — opcjonalnie, jeśli zostanie czas
 
 ## Panel "Ringside read"
 
-Po walce, te same liczby podane w dolarach, **bez udziału modelu** — czysta arytmetyka:
+Po walce, te same liczby podane w dolarach, **bez udziału modelu** — czysta arytmetyka
+puli o stałym iloczynie (x·y=k):
 
-- ile sprzedasz, zanim cena spadnie o 10% (ok. 2,7% płynności, pula o stałym iloczynie)
+- ile sprzedasz, zanim cena spadnie o 10% (ok. 2,7% płynności)
 - ile papieru przypada na $1 wyjścia (kapitalizacja / płynność)
+- **ile zakupu potrzeba na 2x** ≈ 41,4% płynności (√2 - 1)
+- **ile sprzedaży sprowadza cenę o połowę** ≈ 29,3% płynności (1 - 1/√2)
 
-Przy pierwszej wartości pisz "około". Przy skoncentrowanej płynności (Uniswap v3/v4)
-wynik bywa inny w obie strony — nie udawaj precyzji, której nie ma.
+Dwie ostatnie zawsze pokazuj razem. Ta sama płytka płynność, która ułatwia wzrost,
+równie łatwo działa w dół — pokazanie tylko wzrostu byłoby zachętą, nie informacją.
+
+Przy każdej z tych wartości pisz "około". Przy skoncentrowanej płynności (Uniswap
+v3/v4) wynik bywa inny w obie strony — nie udawaj precyzji, której nie ma.
+
+**Czego ten panel NIE robi:** nie podaje prawdopodobieństwa, że token urośnie.
+Z płynności, kapitalizacji, holderów i wieku nie wynika szansa na 2x. Panel mówi,
+ile kosztuje ruch ceny, nie czy ten ruch nastąpi. Nigdy nie formułuj tego jako
+"większa szansa na wzrost", "lepsza okazja" ani żadnej innej prognozy.
 
 ## Konfiguracja API
 
@@ -197,6 +208,9 @@ wygenerowany obrazek. Obrazek jest statyczny i nie umie się ruszać.
 Postać: **Tung Tung Tung Sahur** — kłoda z rękami i pałką, z włoskiego brainrotu.
 Proste kształty, więc rysuje się jako SVG i animuje: wymach pałką przy odliczaniu,
 uderzenie w gong na start rundy.
+
+Nie używaj nazwiska ani wizerunku żyjącej osoby — ani jako sędziego, ani jako
+zawodnika, ani w nazwie projektu.
 
 ## Kolejność prac
 

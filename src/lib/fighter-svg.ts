@@ -9,6 +9,24 @@
  * i nie umie się ruszać (CLAUDE.md § Sędzia).
  *
  * Czysta funkcja, bez DOM i bez sieci — działa i po stronie serwera.
+ *
+ * Sylwetka jest pocięta na grupy, bo każdy ruch potrzebuje własnego
+ * `transform`. Dwa ruchy na jednej grupie znaczą, że drugi wymazuje pierwszy:
+ * `transform` jest jedną własnością, nie listą, więc chwianie na tej samej
+ * grupie co wykrok zniosłoby wykrok. Zagnieżdżenie je składa.
+ *
+ *   .fig      przewrót na deski i szarpnięcie po ciosie (było wcześniej)
+ *   .sway     chwianie przy niskim pasku życia
+ *   .stance   wykrok przy ciosie, cofnięcie po nim, odskok przy uniku
+ *   .leg-rear / .leg-lead   krok: tylna stopa zostaje, przednia wychodzi
+ *   .torso    obrót tułowia w cios
+ *   .head     odskok głowy przy trafieniu (było wcześniej)
+ *   .arm-lead / .arm-rear   ciosy obiema rękami i opuszczanie gardy
+ *
+ * Geometria się nie zmieniła — te same kształty w tych samych miejscach,
+ * tylko opakowane. Kolejność rysowania butów i nóg przeszła z „obie nogi,
+ * potem oba buty" na „noga z butem, noga z butem"; kształty nie zachodzą
+ * na siebie w poziomie, więc na obrazie nie widać różnicy.
  */
 
 export interface FighterLook {
@@ -32,25 +50,24 @@ export function drawFighter(f: FighterLook, side: FighterSide): string {
   const lean = f.stamina < 35
   const x = 60 // linia środkowa
   const shoulderY = 84
+  const wheels = side === 'a' // czerwony narożnik: koła rowerowe zamiast rękawic
   const parts: string[] = []
 
-  // nogi
+  // Nogi z butami, każda w swojej grupie. Przednia jest ta po stronie +x, bo
+  // tam stoi przeciwnik: +x to zawsze „do przodu", a stronę B odbija lustrem
+  // `transform:scaleX(-1)` na całym SVG. Dzięki temu wykrok nie potrzebuje
+  // dwóch wersji dla dwóch narożników.
   parts.push(
-    `<path d="M${x - bodyW * 0.32} 126 L${x - bodyW * 0.55} 168 L${x - bodyW * 0.05} 168 L${
-      x - 2
-    } 126 Z" fill="${kit}" opacity=".85"/>`,
+    `<g class="leg-rear"><path d="M${x - bodyW * 0.32} 126 L${x - bodyW * 0.55} 168 L${
+      x - bodyW * 0.05
+    } 168 L${x - 2} 126 Z" fill="${kit}" opacity=".85"/>` +
+      `<rect x="${x - bodyW * 0.62}" y="163" width="${bodyW * 0.62}" height="7" rx="2" fill="var(--ink)"/></g>`,
   )
   parts.push(
-    `<path d="M${x + bodyW * 0.05} 126 L${x + bodyW * 0.18} 168 L${x + bodyW * 0.62} 168 L${
-      x + bodyW * 0.42
-    } 126 Z" fill="${kit}" opacity=".85"/>`,
-  )
-  // buty
-  parts.push(
-    `<rect x="${x - bodyW * 0.62}" y="163" width="${bodyW * 0.62}" height="7" rx="2" fill="var(--ink)"/>`,
-  )
-  parts.push(
-    `<rect x="${x + bodyW * 0.12}" y="163" width="${bodyW * 0.58}" height="7" rx="2" fill="var(--ink)"/>`,
+    `<g class="leg-lead"><path d="M${x + bodyW * 0.05} 126 L${x + bodyW * 0.18} 168 L${
+      x + bodyW * 0.62
+    } 168 L${x + bodyW * 0.42} 126 Z" fill="${kit}" opacity=".85"/>` +
+      `<rect x="${x + bodyW * 0.12}" y="163" width="${bodyW * 0.58}" height="7" rx="2" fill="var(--ink)"/></g>`,
   )
   // spodenki
   parts.push(
@@ -59,17 +76,24 @@ export function drawFighter(f: FighterLook, side: FighterSide): string {
     } 128 L${x - bodyW * 0.5} 132 Z" fill="var(--ink)"/>`,
   )
   parts.push(`<rect x="${x - bodyW * 0.5}" y="106" width="${bodyW}" height="5" fill="${kit}"/>`)
-  // tors
+  // Tors, a w nim głowa i obie ręce: obrót tułowia ma je ciągnąć za sobą,
+  // tak jak w ciele. Grupa zamyka się na końcu, po przedniej rękawicy.
   const torsoTop = lean ? 64 : 60
   parts.push(
-    `<path d="M${x - bodyW * 0.44} ${torsoTop} Q${x} ${torsoTop - 6} ${x + bodyW * 0.44} ${torsoTop} L${
-      x + bodyW * 0.52
-    } 110 L${x - bodyW * 0.52} 110 Z" fill="${kit}"/>`,
+    `<g class="torso"><path d="M${x - bodyW * 0.44} ${torsoTop} Q${x} ${torsoTop - 6} ${
+      x + bodyW * 0.44
+    } ${torsoTop} L${x + bodyW * 0.52} 110 L${x - bodyW * 0.52} 110 Z" fill="${kit}"/>`,
   )
-  // tylna ręka i rękawica (schowana)
+  // tylna ręka i rękawica (schowana) — u czerwonego koło roweru, ten sam środek i promień
+  const rearFistCx = x + 22
+  const rearFistCy = shoulderY - 2
+  const rearFistR = gloveR * 0.85
   parts.push(
     `<g class="arm-rear"><rect x="${x - 6}" y="${shoulderY - 6}" width="22" height="11" rx="5" fill="${kit}" opacity=".75"/>` +
-      `<circle cx="${x + 22}" cy="${shoulderY - 2}" r="${gloveR * 0.85}" fill="var(--gold)"/></g>`,
+      (wheels
+        ? drawWheel(rearFistCx, rearFistCy, rearFistR)
+        : `<circle cx="${rearFistCx}" cy="${rearFistCy}" r="${rearFistR}" fill="var(--gold)"/>`) +
+      `</g>`,
   )
   // głowa
   let headParts = `<circle cx="${x}" cy="52" r="19" fill="${kit}"/>`
@@ -86,14 +110,43 @@ export function drawFighter(f: FighterLook, side: FighterSide): string {
     headParts += `<path d="M${x - 4} 62 Q${x + 8} 78 ${x + 17} 60 Q${x + 8} 70 ${x - 4} 62 Z" fill="var(--ink)" opacity=".55"/>`
   }
   parts.push(`<g class="head">${headParts}</g>`)
-  // przednia ręka i rękawica
+  // przednia ręka i rękawica — u czerwonego koło roweru, ten sam środek i promień
+  const leadFistCx = x + 32
+  const leadFistCy = shoulderY - 6
   parts.push(
     `<g class="arm-lead"><rect x="${x + 2}" y="${shoulderY - 12}" width="26" height="12" rx="6" fill="${kit}"/>` +
-      `<circle cx="${x + 32}" cy="${shoulderY - 6}" r="${gloveR}" fill="var(--gold)"/>` +
-      `<circle cx="${x + 32}" cy="${shoulderY - 6}" r="${gloveR * 0.45}" fill="var(--ink)" opacity=".18"/></g>`,
+      (wheels
+        ? drawWheel(leadFistCx, leadFistCy, gloveR)
+        : `<circle cx="${leadFistCx}" cy="${leadFistCy}" r="${gloveR}" fill="var(--gold)"/>` +
+          `<circle cx="${leadFistCx}" cy="${leadFistCy}" r="${gloveR * 0.45}" fill="var(--ink)" opacity=".18"/>`) +
+      `</g>`,
   )
+  parts.push('</g>') // koniec torsu
 
-  return `<svg viewBox="0 0 120 176" role="img" aria-label="${escapeAttr(f.symbol)}"><g class="fig">${parts.join('')}</g></svg>`
+  return (
+    `<svg viewBox="0 0 120 176" role="img" aria-label="${escapeAttr(f.symbol)}">` +
+    `<g class="fig"><g class="sway"><g class="stance">${parts.join('')}</g></g></g></svg>`
+  )
+}
+
+/**
+ * Koło rowerowe w miejscu pięści: obręcz, kilka szprych, piasta — ten sam
+ * środek i promień co usunięta rękawica, więc `.arm-lead`/`.arm-rear` obracają
+ * je tak samo jak wcześniej okrągłą rękawicę.
+ */
+function drawWheel(cx: number, cy: number, r: number): string {
+  const spokes = Array.from({ length: 5 }, (_, i) => {
+    const angle = (Math.PI * 2 * i) / 5 - Math.PI / 2
+    const x2 = cx + r * 0.8 * Math.cos(angle)
+    const y2 = cy + r * 0.8 * Math.sin(angle)
+    return `<line x1="${cx}" y1="${cy}" x2="${x2.toFixed(2)}" y2="${y2.toFixed(2)}" stroke="var(--gold)" stroke-width="1.3"/>`
+  }).join('')
+  return (
+    `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--ink)" stroke-width="${(r * 0.3).toFixed(2)}"/>` +
+    `<circle cx="${cx}" cy="${cy}" r="${(r * 0.8).toFixed(2)}" fill="none" stroke="var(--gold)" stroke-width="1"/>` +
+    spokes +
+    `<circle cx="${cx}" cy="${cy}" r="${(r * 0.16).toFixed(2)}" fill="var(--ink)"/>`
+  )
 }
 
 /**

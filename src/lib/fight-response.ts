@@ -10,6 +10,7 @@ import type { Standings } from '../app/api/fight/route'
 import type { TokenFightData } from './codex'
 import type { FightResult } from './fight'
 import type { Matchup } from './stats'
+import type { TrackedWallets } from './tracked'
 
 export interface FightApiResponse {
   network: { id: number }
@@ -20,6 +21,12 @@ export interface FightApiResponse {
   fight: FightResult
   /** Bilans obu kontraktów po tej walce; `null`, gdy rankingu nie było. */
   standings: Standings | null
+  /**
+   * Ile adresów z serwerowej listy obserwowanych portfeli trzyma każdego
+   * z tokenów. Same liczby — lista nigdy nie wychodzi z serwera, a `tracked.ts`
+   * nie jest tu importowany inaczej niż jako typ (patrz nagłówek pliku).
+   */
+  tracked: TrackedWallets
 }
 
 export interface FightApiError {

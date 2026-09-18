@@ -83,6 +83,23 @@ export async function setIfAbsent(key: string, value: unknown): Promise<boolean>
   return result !== null
 }
 
+/**
+ * INCR plus EXPIRE w jednym wywołaniu REST — licznik, który sam po sobie
+ * sprząta. Na tym stoi limit zapytań na IP: klucz zawiera numer okna, więc
+ * po jego upływie po prostu wygasa i nie trzeba go zerować.
+ *
+ * `EXPIRE` bez `NX`, czyli TTL odnawia się przy każdym trafieniu. Klucz i tak
+ * nigdy nie wraca do użycia (numer okna rośnie), więc odnowienie przedłuża
+ * tylko jego leżenie w bazie, a nie okno limitu.
+ */
+export async function incrementWithTtl(key: string, ttlSeconds: number): Promise<number> {
+  const [count] = await pipeline([
+    ['INCR', key],
+    ['EXPIRE', key, Math.max(1, Math.ceil(ttlSeconds))],
+  ])
+  return typeof count === 'number' ? count : Number(count ?? 0)
+}
+
 export async function zadd(key: string, score: number, member: string): Promise<void> {
   await pipeline([['ZADD', key, score, member]])
 }
@@ -128,10 +145,22 @@ function parse<T>(raw: unknown): T | null {
  * Mapy wiszą na `globalThis`: w `next dev` moduły przeładowują się przy
  * każdej zmianie pliku, a zwykła zmienna modułowa gubiłaby przy tym ranking.
  */
+interface MemoryStore {
+  strings: Map<string, string>
+  zsets: Map<string, Map<string, number>>
+  /** Liczniki z terminem waznosci — pod limit zapytan na IP. */
+  counters: Map<string, { count: number; expiresAt: number }>
+}
+
 const memory = ((globalThis as Record<string, unknown>).__cageKv ??= {
   strings: new Map<string, string>(),
   zsets: new Map<string, Map<string, number>>(),
-}) as { strings: Map<string, string>; zsets: Map<string, Map<string, number>> }
+  counters: new Map<string, { count: number; expiresAt: number }>(),
+}) as MemoryStore
+
+// Obiekt moze pochodzic z instancji modulu sprzed dodania licznikow — w `next
+// dev` moduly przeladowuja sie, a `??=` wyzej nie dotknie juz istniejacego.
+memory.counters ??= new Map()
 
 function memoryPipeline(commands: Command[]): unknown[] {
   return commands.map((command) => {
@@ -179,6 +208,27 @@ function memoryPipeline(commands: Command[]): unknown[] {
 
       case 'ZCARD':
         return memory.zsets.get(key)?.size ?? 0
+
+      case 'INCR': {
+        const now = Date.now()
+        const held = memory.counters.get(key)
+        // Wpis po terminie liczy sie jak nieobecny: bez tego licznik z okna,
+        // ktore juz minelo, zostalby w pamieci i blokowal nastepne.
+        const count = (held && held.expiresAt > now ? held.count : 0) + 1
+        memory.counters.set(key, { count, expiresAt: held?.expiresAt ?? now })
+        return count
+      }
+
+      case 'EXPIRE': {
+        const held = memory.counters.get(key)
+        if (held) held.expiresAt = Date.now() + Number(rest[0]) * 1_000
+        // Sprzatanie: bez bazy nikt nie usunie wygaslych kluczy za nas,
+        // a proces na Vercelu zyje miedzy zapytaniami.
+        for (const [k, v] of memory.counters) {
+          if (v.expiresAt <= Date.now()) memory.counters.delete(k)
+        }
+        return 1
+      }
 
       default:
         throw new Error('Magazyn pamięciowy nie zna komendy ' + name)

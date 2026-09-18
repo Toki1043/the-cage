@@ -2,11 +2,26 @@ import { NextRequest, NextResponse } from 'next/server'
 import { fetchTokenFightData } from '@/lib/codex'
 import { simulateFight } from '@/lib/fight'
 import { recordFight, readRecord, type TokenRecord } from '@/lib/leaderboard'
+import { clientIp, rateLimit, rateLimitHeaders } from '@/lib/rate-limit'
 import { matchup } from '@/lib/stats'
+import { trackedWallets } from '@/lib/tracked'
 
 // Domyślna sieć: Robinhood Chain (Codex networkId 4663) — potwierdzone
 // zapytaniem `{ getNetworks { name id } }`, patrz CLAUDE.md § Kolejność prac.
 const DEFAULT_NETWORK_ID = 4663
+
+/**
+ * Limit zapytań na IP: dziesięć walk na minutę.
+ *
+ * Jedna walka to dziesięć zapytań do Codexu, a darmowy próg to 10 000
+ * miesięcznie — dziesięć na minutę z jednego adresu to i tak więcej, niż
+ * człowiek zdąży obejrzeć, i wciąż mniej, niż potrzeba, żeby pętla
+ * odświeżająca stronę zjadła miesięczny budżet w kwadrans.
+ *
+ * Drugi powód jest w `tracked.ts`: licznik obserwowanych portfeli da się
+ * sondować walka po walce. Limit tego nie zamyka, ale podnosi koszt.
+ */
+const RATE_LIMIT = { limit: 10, windowSeconds: 60 }
 
 /**
  * GET /api/fight?a=0x...&b=0x...&network=4663
@@ -22,6 +37,12 @@ const DEFAULT_NETWORK_ID = 4663
  * Na koniec rozgrywa trzyrundową walkę: wynik liczy deterministyczna symulacja
  * z ziarna policzonego z obu adresów. Bez modelu językowego — komentarz i
  * sędzia dochodzą osobno i dostają gotowy rezultat.
+ *
+ * Osobno, obok walki i bez wpływu na nią, idzie licznik obserwowanych
+ * portfeli: ile adresów z serwerowej listy `TRACKED_WALLETS` trzyma każdego
+ * z tokenów. Wychodzi wyłącznie liczba — nigdy adresy i nigdy sama lista.
+ *
+ * Trasa ma limit zapytań na IP; przy przekroczeniu wraca 429 z `Retry-After`.
  *
  * Wynik idzie do rankingu razem ze snapshotem, na którym został policzony.
  * Zapis jest idempotentny po parze adresów, więc odświeżanie strony nie
@@ -55,6 +76,21 @@ export async function GET(request: NextRequest) {
     )
   }
 
+  // Limit przed pierwszym zapytaniem do Codexu — liczy się właśnie po to,
+  // żeby te zapytania nie poszły.
+  const verdict = await rateLimit('fight', clientIp(request.headers), RATE_LIMIT)
+  const limitHeaders = rateLimitHeaders(verdict)
+  if (!verdict.ok) {
+    return NextResponse.json(
+      {
+        error:
+          `Too many fights from this address. ${RATE_LIMIT.limit} a minute is the cap — ` +
+          `try again in ${verdict.retryAfter}s.`,
+      },
+      { status: 429, headers: limitHeaders },
+    )
+  }
+
   try {
     const [tokenA, tokenB] = await Promise.all([
       fetchTokenFightData(a, networkId),
@@ -62,22 +98,33 @@ export async function GET(request: NextRequest) {
     ])
 
     const fight = simulateFight(tokenA, tokenB)
-    const standings = await settle(tokenA, tokenB, fight, searchParams.get('record') !== '0')
 
-    return NextResponse.json({
-      network: { id: networkId },
-      tokenA,
-      tokenB,
-      // Walka między kategoriami dostaje widoczne oznaczenie — front musi
-      // wiedzieć, że lżejszy bije powyżej swojej wagi (CLAUDE.md).
-      matchup: matchup(tokenA.weightClass, tokenB.weightClass),
-      fight,
-      standings,
-    })
+    // Ranking i licznik obserwowanych portfeli — obie rzeczy po walce, obie
+    // równolegle. Żadna z nich nie może zmienić `fight`: wynik jest policzony
+    // wyżej i od tej linii jest już tylko przekazywany dalej.
+    const [standings, tracked] = await Promise.all([
+      settle(tokenA, tokenB, fight, searchParams.get('record') !== '0'),
+      trackedWallets(tokenA, tokenB),
+    ])
+
+    return NextResponse.json(
+      {
+        network: { id: networkId },
+        tokenA,
+        tokenB,
+        // Walka między kategoriami dostaje widoczne oznaczenie — front musi
+        // wiedzieć, że lżejszy bije powyżej swojej wagi (CLAUDE.md).
+        matchup: matchup(tokenA.weightClass, tokenB.weightClass),
+        fight,
+        standings,
+        tracked,
+      },
+      { headers: limitHeaders },
+    )
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Unknown error' },
-      { status: 502 },
+      { status: 502, headers: limitHeaders },
     )
   }
 }
@@ -86,6 +133,11 @@ export async function GET(request: NextRequest) {
 export interface Standings {
   /** `false`, gdy ta walka była już w rankingu — wtedy nic nie doszło. */
   recorded: boolean
+  /**
+   * Czemu nic nie doszło: `duplicate` — ta para już walczyła, `cancelled` —
+   * obaj nie przeszli badań, więc nie było walki do zapisania.
+   */
+  reason: 'duplicate' | 'cancelled' | null
   /** `false`, gdy ranking stoi na pamięci procesu i zginie przy restarcie. */
   persistent: boolean
   a: TokenRecord | null
@@ -113,7 +165,13 @@ async function settle(
       readRecord(tokenA.networkId, tokenA.address),
       readRecord(tokenB.networkId, tokenB.address),
     ])
-    return { recorded: outcome.recorded, persistent: outcome.persistent, a, b }
+    return {
+      recorded: outcome.recorded,
+      reason: outcome.reason,
+      persistent: outcome.persistent,
+      a,
+      b,
+    }
   } catch {
     return null
   }

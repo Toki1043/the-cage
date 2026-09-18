@@ -10,6 +10,7 @@ import {
   simulateFight,
   type FighterInput,
 } from '../src/lib/fight.ts'
+import { concentrationVerdict, type Concentration } from '../src/lib/concentration.ts'
 import type { ChartModifiers, FightStats } from '../src/lib/stats.ts'
 
 let failed = 0
@@ -39,12 +40,39 @@ const mods = (over: Partial<ChartModifiers> = {}): ChartModifiers => ({
   ...over,
 })
 
+/**
+ * Koncentracja policzona na saldach, tak jak w API — nie wpisany procent.
+ * `unavailable` jest domyślne, bo tak wygląda dzisiejsza odpowiedź Codexu na
+ * darmowym planie: pasmo `clear`, `enforced: false`, zero wpływu na walkę.
+ */
+const conc = (over: Partial<Concentration> = {}): Concentration => ({
+  status: 'unavailable',
+  top10Percent: null,
+  rawTop10Percent: null,
+  holderSupply: null,
+  totalSupply: null,
+  excluded: [],
+  excludedShare: null,
+  holdersConsidered: 0,
+  balancesFetched: 0,
+  note: 'test',
+  ...over,
+})
+
 const fighter = (
   address: string,
   symbol: string,
   stats: FightStats,
   over: Partial<ChartModifiers> = {},
-): FighterInput => ({ address, symbol, stats, modifiers: mods(over) })
+  concentration: Concentration = conc(),
+): FighterInput => ({
+  address,
+  symbol,
+  stats,
+  modifiers: mods(over),
+  concentration: concentrationVerdict(concentration),
+})
+
 
 // Realne statystyki z żywego API: AI i WETH na parach referencyjnych.
 const AI = fighter('0x2e8c31162b855a2ffa90f6f8634643ad6f111e18', 'AI', {
@@ -192,6 +220,7 @@ const bare: FighterInput = {
   symbol: 'BARE',
   stats: { wytrzymalosc: 0, sila: 0, garda: 0, szybkosc: 0 },
   modifiers: mods({ volatility: null, drawdownFromPeakClose: null, priceChange24h: null }),
+  concentration: concentrationVerdict(conc()),
 }
 const bareFight = simulateFight(bare, AI)
 check('walka z brakiem modyfikatorów dochodzi do końca', ['KO', 'TKO', 'decision', 'draw'].includes(bareFight.method), true)
@@ -226,6 +255,9 @@ const statSum = (s: FightStats) => s.wytrzymalosc + s.sila + s.garda + s.szybkos
 
 const N = 1500
 let early = 0
+let tkos = 0
+let withKnockdown = 0
+let knockdownsTotal = 0
 const seenMethods = new Set<string>()
 const winners = new Set<string>()
 for (let i = 0; i < N; i++) {
@@ -234,6 +266,10 @@ for (let i = 0; i < N; i++) {
     fighter(addr(i * 2 + 1), 'Y', randStats(), { volatility: rnd() * 3 }),
   )
   if (r.method === 'KO' || r.method === 'TKO') early++
+  if (r.method === 'TKO') tkos++
+  const knockdowns = r.rounds.reduce((n, round) => n + round.knockdowns.a + round.knockdowns.b, 0)
+  knockdownsTotal += knockdowns
+  if (knockdowns > 0) withKnockdown++
   seenMethods.add(r.method)
   winners.add(String(r.winner))
 }
@@ -244,6 +280,22 @@ console.log(`     na ${N} par: nokauty ${koRate.toFixed(1)}%, sposoby ${[...seen
 check('nokaut w 5-25% walk', koRate >= 5 && koRate <= 25, true)
 check('większość walk idzie na punkty', koRate < 50, true)
 check('obie strony potrafią wygrać', winners.has('a') && winners.has('b'), true)
+
+// Nokdaun i TKO: przez pomyłkę stały na progu obrażeń równym 10% puli życia
+// obrońcy, którego najcięższy możliwy cios nie dochodził (max 3,5–5,4%).
+// Oba były martwym kodem. Te progi pilnują, żeby nie wróciły do tego stanu
+// ani nie poszły w drugą stronę, w nokdaun co drugą rundę.
+const kdRate = (withKnockdown / N) * 100
+const tkoRate = (tkos / N) * 100
+console.log(
+  `     nokdaun w ${kdRate.toFixed(1)}% walk, TKO w ${tkoRate.toFixed(1)}%, ` +
+  `${(knockdownsTotal / N).toFixed(2)} nokdaunów na walkę`,
+)
+check('nokdaun w 20-30% walk', kdRate >= 20 && kdRate <= 30, true)
+check('nokdaun nie jest normą', kdRate < 50, true)
+check('TKO zdarza się realnie', tkoRate > 0.3, true)
+check('TKO zostaje rzadkie', tkoRate < 5, true)
+check('nokdaun bywa więcej niż jeden na walkę', knockdownsTotal / N > kdRate / 100, true)
 
 // Żadna statystyka nie może decydować sama. Przy podwójnych dźwigniach
 // szybkość wygrywała 98% pojedynków 80 vs 20, a wytrzymałość 53%.

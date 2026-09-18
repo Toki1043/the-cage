@@ -1,4 +1,12 @@
 import {
+  computeConcentration,
+  concentrationUnavailable,
+  concentrationVerdict,
+  type Concentration,
+  type ConcentrationVerdict,
+  type HolderBalance,
+} from './concentration.ts'
+import {
   computeChartModifiers,
   computeStats,
   latestClose,
@@ -8,7 +16,7 @@ import {
   type ChartModifiers,
   type FightStats,
   type WeightClass,
-} from './stats'
+} from './stats.ts'
 
 const CODEX_ENDPOINT = 'https://graph.codex.io/graphql'
 
@@ -68,6 +76,14 @@ export interface TokenSnapshot {
   holders: number
   priceUsd: number
   circulatingSupply: number
+  totalSupply: number
+  /**
+   * Koncentracja podaży w dziesięciu największych portfelach, po odsianiu
+   * adresów niebędących holderami. Idzie do snapshotu jak każda inna liczba
+   * wejściowa: bez niej nie da się odtworzyć, czemu zawodnik dostał karę
+   * albo nie przeszedł badań (CLAUDE.md § Determinizm).
+   */
+  concentration: Concentration
   /**
    * Kapitalizacja podana przez Codex, tylko do audytu. Codex liczy ją z ceny
    * pary, którą sam sobie wybrał, więc dryfuje między zapytaniami. Do wagi
@@ -98,6 +114,12 @@ export interface TokenFightData {
   stats: FightStats
   weightClass: WeightClass
   modifiers: ChartModifiers
+  /**
+   * Pasmo koncentracji wyprowadzone ze snapshotu — to ono wchodzi do
+   * symulacji. Trzymane obok statystyk, a nie liczone drugi raz w symulacji:
+   * drugi rachunek tego samego to drugie miejsce, w którym może się rozjechać.
+   */
+  concentration: ConcentrationVerdict
 }
 
 // Jedyne zapytanie zawężone do par konkretnego tokena. `filterPairs(phrase:)`
@@ -126,8 +148,32 @@ const TOKEN_QUERY = `
       results {
         holders
         marketCap
-        token { info { address name symbol circulatingSupply } }
+        top10HoldersPercent
+        token { info { address name symbol circulatingSupply totalSupply } }
       }
+    }
+  }
+`
+
+/**
+ * Salda największych portfeli — jedyne źródło, z którego da się policzyć
+ * koncentrację po odsianiu adresów niebędących holderami.
+ *
+ * **Wymaga planu Growth albo Enterprise.** Na darmowym kluczu wraca
+ * `NOT_AUTHORIZED: please upgrade your plan` (sprawdzone też na WETH
+ * z mainnetu, więc to blokada planu, nie sieci). Bez niej zostaje surowy
+ * `top10HoldersPercent`, którego nie da się odsiać — patrz `fetchHolders`.
+ *
+ * `limit` 50 zamiast 10: dziesiątka musi zostać **po** odsiewie, a w surowej
+ * dziesiątce siedzą pule płynności i adres spalania.
+ */
+const HOLDERS_QUERY = `
+  query($tokenId: String!, $limit: Int!) {
+    holders(input: { tokenId: $tokenId, limit: $limit }) {
+      count
+      status
+      top10HoldersPercent
+      items { address shiftedBalance }
     }
   }
 `
@@ -264,12 +310,14 @@ async function fetchTokenMeta(address: string, networkId: number) {
       results: {
         holders: number
         marketCap: string | null
+        top10HoldersPercent: number | null
         token: {
           info: {
             address: string
             name: string
             symbol: string
             circulatingSupply: string | null
+            totalSupply: string | null
           }
         }
       }[]
@@ -294,7 +342,80 @@ async function fetchTokenMeta(address: string, networkId: number) {
     info: result.token.info,
     holders: toNumber(result.holders),
     circulatingSupply: toNumber(result.token.info.circulatingSupply),
+    totalSupply: toNumber(result.token.info.totalSupply),
     reportedMarketCapUsd: result.marketCap === null ? null : toNumber(result.marketCap),
+    /** Bez odsiewu — tylko do audytu, nigdy do progów. */
+    rawTop10Percent:
+      typeof result.top10HoldersPercent === 'number' && Number.isFinite(result.top10HoldersPercent)
+        ? result.top10HoldersPercent
+        : null,
+  }
+}
+
+/** Ile sald ciągniemy: dziesiątka musi zostać po odsiewie. */
+const HOLDER_BALANCES_LIMIT = 50
+
+/**
+ * Plan raz odmówił — nie pytamy drugi raz w tym procesie.
+ *
+ * Bez tego każda walka wysyła dwa zapytania, o których już wiemy, że wrócą
+ * z `NOT_AUTHORIZED`. Przy darmowym progu 10 000 miesięcznie to 2 zapytania
+ * na walkę wyrzucone na odpowiedź, którą znamy, plus jedno okrążenie sieci
+ * w ścieżce krytycznej. Blokada planu nie zmieni się w trakcie życia procesu;
+ * po podniesieniu planu wystarczy restart.
+ */
+let holdersPlanDenied: string | null = null
+
+/**
+ * Salda największych portfeli, albo `null` gdy plan ich nie daje.
+ *
+ * Nie wywraca walki. Brak sald znaczy tylko, że koncentracji nie da się
+ * odsiać — a wtedy nie wymierzamy z niej kary. Zamiana tego na błąd
+ * zabrałaby całą funkcjonalność za coś, co jest ograniczeniem planu API.
+ */
+async function fetchHolderBalances(
+  address: string,
+  networkId: number,
+): Promise<{ balances: HolderBalance[] } | { balances: null; note: string }> {
+  if (holdersPlanDenied !== null) return { balances: null, note: holdersPlanDenied }
+
+  try {
+    const data = await codexQuery<{
+      holders: {
+        count: number
+        status: string
+        top10HoldersPercent: number | null
+        items: { address: string; shiftedBalance: string | null }[]
+      }
+    }>(HOLDERS_QUERY, { tokenId: `${address}:${networkId}`, limit: HOLDER_BALANCES_LIMIT })
+
+    const holders = data.holders
+    if (holders?.status === 'DISABLED') {
+      return { balances: null, note: 'Codex reports holder data disabled for this token.' }
+    }
+    const items = holders?.items ?? []
+    if (items.length === 0) {
+      return { balances: null, note: 'Codex returned no holder balances for this token.' }
+    }
+    return {
+      balances: items.map((item) => ({
+        address: item.address,
+        balance: toNumber(item.shiftedBalance),
+      })),
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    // Plan Growth/Enterprise — jedyny powód, dla którego to zapytanie pada
+        // na sprawnym kluczu. Rozpoznajemy go, żeby front mógł napisać wprost,
+    // czego brakuje, zamiast pokazywać puste pole.
+    if (message.includes('NOT_AUTHORIZED') || message.includes('upgrade your plan')) {
+      holdersPlanDenied =
+        'Holder balances need a Codex Growth or Enterprise plan, so the top-10 share ' +
+        'cannot be filtered down to real holders. Shown unfiltered, and it carries no ' +
+        'weight in the fight.'
+      return { balances: null, note: holdersPlanDenied }
+    }
+    return { balances: null, note: `Holder balances unavailable: ${message}` }
   }
 }
 
@@ -334,17 +455,19 @@ async function fetchBars(
  * z jednej pary referencyjnej: tej o największej płynności. Inaczej ta sama
  * para adresów daje za każdym razem inne statystyki, a ranking traci sens.
  *
- * Koszt: 4 zapytania na token, czyli 8 na walkę. Darmowy próg Codexu to
- * 10 000 miesięcznie, więc mieści się w tym około 1250 walk — przy większym
- * ruchu potrzebny cache per token. Patrz CLAUDE.md § Źródło danych.
+ * Koszt: 5 zapytań na token, czyli 10 na walkę — piąte to salda holderów do
+ * koncentracji podaży. Darmowy próg Codexu to 10 000 miesięcznie, więc mieści
+ * się w tym około 1000 walk; przy większym ruchu potrzebny cache per token.
+ * Patrz CLAUDE.md § Źródło danych.
  */
 export async function fetchTokenFightData(
   address: string,
   networkId: number,
 ): Promise<TokenFightData> {
-  const [pairs, meta] = await Promise.all([
+  const [pairs, meta, holderBalances] = await Promise.all([
     fetchPairs(address, networkId),
     fetchTokenMeta(address, networkId),
+    fetchHolderBalances(address, networkId),
   ])
 
   if (pairs.length === 0) {
@@ -365,6 +488,22 @@ export async function fetchTokenFightData(
   // Cena z pary referencyjnej, nie z tej, którą wybrał sobie Codex.
   const priceUsd = latestClose(hourly) ?? 0
 
+  // Koncentracja podaży: najpierw odsiew adresów niebędących holderami,
+  // dopiero potem procent. Adresy par bierzemy z `ranked` — to te same pary,
+  // które już mamy z wyboru pary referencyjnej, więc odsiew nie kosztuje
+  // ani jednego dodatkowego zapytania.
+  const concentration =
+    holderBalances.balances === null
+      ? concentrationUnavailable(meta.rawTop10Percent, holderBalances.note)
+      : computeConcentration({
+          balances: holderBalances.balances,
+          totalSupply: meta.totalSupply,
+          tokenAddress: meta.info.address,
+          pairAddresses: ranked.map((p) => p.address),
+          networkId,
+          rawTop10Percent: meta.rawTop10Percent,
+        })
+
   // Kapitalizacja z ceny pary referencyjnej i podaży w obiegu. To definicja
   // kapitalizacji, a nie wybór jednego z kilku wyników — i dzięki temu waga
   // nie przeskakuje między kategoriami przy niezmienionym tokenie.
@@ -384,6 +523,8 @@ export async function fetchTokenFightData(
     holders: meta.holders,
     priceUsd,
     circulatingSupply: meta.circulatingSupply,
+    totalSupply: meta.totalSupply,
+    concentration,
     reportedMarketCapUsd: meta.reportedMarketCapUsd,
     marketCapDivergesFromReported: divergesFromReported(
       marketCapUsd,
@@ -409,5 +550,6 @@ export async function fetchTokenFightData(
     }),
     weightClass: weightClass(snapshot.marketCapUsd),
     modifiers: computeChartModifiers(daily, hourly),
+    concentration: concentrationVerdict(snapshot.concentration),
   }
 }

@@ -11,6 +11,7 @@
  * adresów, więc ta sama para adresów przy tym samym snapshocie daje
  * bit w bit ten sam przebieg.
  */
+import type { ConcentrationVerdict } from './concentration'
 import type { ChartModifiers, FightStats } from './stats'
 
 /** Trzy rundy — patrz CLAUDE.md § Sędzia. */
@@ -24,6 +25,12 @@ export interface FighterInput {
   symbol: string
   stats: FightStats
   modifiers: ChartModifiers
+  /**
+   * Pasmo koncentracji podaży, policzone po odsianiu adresów niebędących
+   * holderami. `enforced: false` znaczy, że odsiewu nie dało się zrobić —
+   * wtedy koncentracja nie wpływa na walkę (patrz `concentration.ts`).
+   */
+  concentration: ConcentrationVerdict
 }
 
 /* ------------------------------------------------------------------ */
@@ -139,8 +146,60 @@ const BALANCE = {
   damageSpreadFromVolatility: 0.75,
   /** Zmiana 24h jako modyfikator obrażeń — najwyżej ±10%. */
   momentumFrom24h: 0.2,
-  /** Nokdaun: jeden cios zabrał tyle wyjściowej puli życia. */
-  knockdownShare: 0.1,
+  /**
+   * Koncentracja w pasmie 30–50% zabiera do piątej części puli życia.
+   *
+   * Kara wchodzi tu, a nie do samej statystyki wytrzymałości, i to z dwóch
+   * powodów. Wytrzymałość jest zdefiniowana w CLAUDE.md jako funkcja samej
+   * płynności i musi taka zostać, inaczej kontrola poprawności (AI → 67)
+   * przestaje cokolwiek sprawdzać. A pula życia to jedyna dźwignia
+   * wytrzymałości, więc odjęcie od niej **jest** karą do wytrzymałości.
+   * Obok stoi kara za spadek od szczytu, która działa dokładnie tak samo.
+   */
+  concentrationHpPenalty: 0.2,
+  /**
+   * Co znaczy „ciężki cios": górna połowa widełek atakującego, czyli górna
+   * ćwiartka wszystkich jego trafień. Jedna definicja dla nokdaunu i dla
+   * szklanej szczęki.
+   *
+   * Ciężar mierzymy tym, co atakujący wyprowadził, a nie udziałem w puli
+   * życia obrońcy. Poprzedni próg — obrażenia ≥ 10% puli życia — był
+   * nieosiągalny: zmierzone, najcięższy możliwy cios to 3,5–5,4% puli
+   * obrońcy (12% dopiero przy sile 100 przeciw zerowej wytrzymałości
+   * i zerowej gardzie). Nokdauny i TKO były przez to martwym kodem.
+   *
+   * Udział w puli życia jest złą miarą ciężaru jeszcze z jednego powodu:
+   * zależy od obrońcy, więc ten sam cios byłby „ciężki" wobec jednego
+   * przeciwnika i lekki wobec drugiego. Widełki są symetryczne, więc
+   * `1 + spread/2` to górna ćwiartka trafień w każdym pojedynku.
+   */
+  heavyPunchSwing: 0.5,
+  /**
+   * Nokdaun wymaga dwóch rzeczy naraz: ciężkiego ciosu i przeciwnika, który
+   * jest już poobijany — pula życia poniżej tego udziału wyjściowej.
+   *
+   * Sam ciężar ciosu nie wystarczy jako warunek. Trafień w walce jest 32,6,
+   * więc górna ćwiartka to około ośmiu ciężkich ciosów na walkę i nokdaun
+   * padałby praktycznie zawsze. Żeby padał w 20–30% walk z samego ciężaru,
+   * „ciężki" musiałby znaczyć górne 0,9% trafień — a to już nie jest ciężki
+   * cios, tylko loteria na czwartym miejscu po przecinku.
+   *
+   * Druga bramka jest też trafniejsza bokserski: na deski nie idzie się od
+   * jednego dobrego ciosu w pełni sił, tylko od dobrego ciosu w kogoś, kto
+   * już stoi na miękkich nogach.
+   *
+   * Wartość dobrana pomiarem na 1000 par, nie z wyczucia. Próg przekłada się
+   * na odsetek walk z nokdaunem monotonicznie i ostro:
+   *
+   *     0,10 →  8,6% walk (TKO 0,0%)     0,25 → 27,0% walk (TKO 1,8%)
+   *     0,15 → 13,6% walk (TKO 0,2%)     0,30 → 35,7% walk (TKO 3,1%)
+   *     0,20 → 20,0% walk (TKO 0,8%)     0,45 → 60,2% walk (TKO 8,7%)
+   *
+   * 0,25 trafia w środek przedziału 20–30% i zostawia TKO na 1,8%, czyli
+   * około co 55. walka. Sprawdza to `npm run verify:fight`, a pełny rozkład
+   * pokazuje `npm run check:balance`.
+   */
+  knockdownHurtShare: 0.25,
   /** 300% zmienności rocznej to sufit skali. */
   volatilityCeiling: 3,
 } as const
@@ -191,13 +250,26 @@ export interface CombatProfile {
   guardSoak: number
   damageSpread: number
   momentum: number
-  /** Próg obrażeń jednego ciosu, od którego zawodnik idzie na deski. */
-  knockdownThreshold: number
+  /**
+   * Poniżej tej puli życia zawodnik jest poobijany i ciężki cios kładzie go
+   * na deski. Własność obrońcy.
+   */
+  hurtThreshold: number
+  /**
+   * Od jakiego mnożnika widełek cios jest „ciężki" — do nokdaunu i do
+   * szklanej szczęki. Własność atakującego, nie obrońcy.
+   */
+  heavySwing: number
 }
 
 export function combatProfile(fighter: FighterInput): CombatProfile {
   const { wytrzymalosc, sila, garda, szybkosc } = fighter.stats
   const { volatility, drawdownFromPeakClose, priceChange24h } = fighter.modifiers
+  // Kara tylko z pasma wymierzonego na liczbie odsianej. Bez odsiewu
+  // `staminaPenalty` jest zerem i pula życia zostaje nietknięta.
+  const concentrationPenalty = fighter.concentration.enforced
+    ? clamp01(fighter.concentration.staminaPenalty)
+    : 0
 
   // Kwantyzacja przed jakimkolwiek rachunkiem — patrz `MODIFIER_STEP`.
   const volNorm = quantize(clamp01((volatility ?? 0) / BALANCE.volatilityCeiling))
@@ -205,7 +277,9 @@ export function combatProfile(fighter: FighterInput): CombatProfile {
   const change24h = quantize(clamp(priceChange24h ?? 0, -0.5, 0.5))
 
   const hpStart =
-    (BALANCE.hpBase + wytrzymalosc) * (1 - BALANCE.drawdownHpPenalty * drawdown)
+    (BALANCE.hpBase + wytrzymalosc) *
+    (1 - BALANCE.drawdownHpPenalty * drawdown) *
+    (1 - BALANCE.concentrationHpPenalty * concentrationPenalty)
 
   return {
     hpStart,
@@ -216,7 +290,11 @@ export function combatProfile(fighter: FighterInput): CombatProfile {
     damageSpread:
       BALANCE.damageSpreadBase + BALANCE.damageSpreadFromVolatility * volNorm,
     momentum: 1 + change24h * BALANCE.momentumFrom24h,
-    knockdownThreshold: BALANCE.knockdownShare * hpStart,
+    hurtThreshold: BALANCE.knockdownHurtShare * hpStart,
+    heavySwing:
+      1 +
+      (BALANCE.damageSpreadBase + BALANCE.damageSpreadFromVolatility * volNorm) *
+        BALANCE.heavyPunchSwing,
   }
 }
 
@@ -225,6 +303,15 @@ export function combatProfile(fighter: FighterInput): CombatProfile {
 /* ------------------------------------------------------------------ */
 
 export type FightEvent =
+  /**
+   * Badania przed walką: koncentracja podaży od 70% w górę i zawodnik nie
+   * wchodzi do ringu. Nie ma tu losowania — pasmo wyszło z liczby.
+   */
+  | { type: 'medicalsFailed'; fighter: Side; concentrationPercent: number }
+  /** Obaj oblali badania — nie ma z kim walczyć, walka odwołana. */
+  | { type: 'fightCancelled'; concentrationPercent: Record<Side, number> }
+  /** Jeden oblał, drugi bierze walkower. */
+  | { type: 'walkover'; winner: Side; loser: Side }
   /** Sędzia daje instrukcje przed pierwszą rundą. */
   | { type: 'instructions' }
   | { type: 'roundStart'; round: number }
@@ -242,6 +329,12 @@ export type FightEvent =
    */
   | { type: 'knockdown'; round: number; fighter: Side; countTo: 8 }
   | { type: 'roundEnd'; round: number; score: Record<Side, number>; damage: Record<Side, number> }
+  /**
+   * Szklana szczęka: koncentracja w pasmie 50–70% i pierwszy ciężki cios
+   * kładzie zawodnika w pierwszej rundzie. Warunkiem jest cios — jeśli
+   * w pierwszej rundzie żaden nie wejdzie ciężko, walka toczy się dalej.
+   */
+  | { type: 'glassJaw'; round: number; fighter: Side; concentrationPercent: number }
   /** Nokaut: odliczanie zawsze dochodzi do dziesięciu (CLAUDE.md § Sędzia). */
   | { type: 'knockout'; round: number; winner: Side; countTo: 10 }
   | { type: 'technicalKnockout'; round: number; winner: Side; knockdowns: number }
@@ -255,7 +348,11 @@ export interface RoundResult {
   hpAfter: Record<Side, number>
 }
 
-export type FightMethod = 'KO' | 'TKO' | 'decision' | 'draw'
+/**
+ * `walkover` — przeciwnik nie przeszedł badań, walki nie było.
+ * `cancelled` — obaj nie przeszli; nie ma zwycięzcy i nie ma czego zapisać.
+ */
+export type FightMethod = 'KO' | 'TKO' | 'decision' | 'draw' | 'walkover' | 'cancelled'
 
 export interface FightResult {
   /** Ziarno w hexie — z nim i ze snapshotem walkę da się odtworzyć. */
@@ -279,6 +376,12 @@ export interface FightResult {
   endedInRound: number | null
   scorecard: Record<Side, number>
   damageDealt: Record<Side, number>
+  /**
+   * Wynik badań obu stron — pasmo koncentracji i kara, którą z niego
+   * wymierzono. Bez tego nie widać, czemu zawodnik miał mniejszą pulę życia
+   * albo czemu w ogóle nie wszedł do ringu.
+   */
+  medicals: Record<Side, ConcentrationVerdict>
   events: FightEvent[]
 }
 
@@ -313,7 +416,9 @@ export function simulateFight(fighterA: FighterInput, fighterB: FighterInput): F
 
   // Kolejność kanoniczna: indeks 0 to mniejszy adres.
   const aIsFirst = fighterA.address.toLowerCase() <= fighterB.address.toLowerCase()
-  const fighters = aIsFirst ? [fighterA, fighterB] : [fighterB, fighterA]
+  const fighters: readonly [FighterInput, FighterInput] = aIsFirst
+    ? [fighterA, fighterB]
+    : [fighterB, fighterA]
   /** Indeks wewnętrzny → strona z wywołania. */
   const side = (i: 0 | 1): Side => (aIsFirst ? (i === 0 ? 'a' : 'b') : i === 0 ? 'b' : 'a')
 
@@ -322,8 +427,42 @@ export function simulateFight(fighterA: FighterInput, fighterB: FighterInput): F
   const totalDamage = [0, 0]
   const scorecard = [0, 0]
 
+  const bySide = <T,>(values: readonly [T, T]): Record<Side, T> =>
+    ({ [side(0)]: values[0], [side(1)]: values[1] }) as Record<Side, T>
+
+  const medicals = bySide([fighters[0].concentration, fighters[1].concentration])
+
+  // Badania przed pierwszym dzwonkiem. Koncentracja podaży od 70% w górę
+  // i zawodnik nie wchodzi do ringu — nie ma tu ani losowania, ani wyboru:
+  // pasmo wyszło z liczby policzonej na saldach po odsiewie. Bez odsiewu
+  // pasmo jest `clear` i badania przechodzą obaj (patrz `concentration.ts`).
+  const failedMedicals = [
+    fighters[0].concentration.enforced && fighters[0].concentration.band === 'failed',
+    fighters[1].concentration.enforced && fighters[1].concentration.band === 'failed',
+  ] as const
+
+  if (failedMedicals[0] || failedMedicals[1]) {
+    return noContest({
+      failed: failedMedicals,
+      fighters,
+      profiles,
+      side,
+      bySide,
+      medicals,
+      seed,
+      seedKey: key,
+    })
+  }
+
   const events: FightEvent[] = [{ type: 'instructions' }]
   const rounds: RoundResult[] = []
+
+  // Szklana szczęka: pasmo 50–70%. Kładzie tylko w pierwszej rundzie i tylko
+  // po ciosie, który sam w sobie starczyłby na nokdaun.
+  const glassJaw = [
+    fighters[0].concentration.enforced && fighters[0].concentration.band === 'glassJaw',
+    fighters[1].concentration.enforced && fighters[1].concentration.band === 'glassJaw',
+  ] as const
 
   let stopped: { winnerIndex: 0 | 1; round: number; method: 'KO' | 'TKO'; knockdowns: number } | null =
     null
@@ -342,14 +481,21 @@ export function simulateFight(fighterA: FighterInput, fighterB: FighterInput): F
       const landed = next() < att.accuracy
 
       let damage = 0
+      let swing = 0
       if (landed) {
         // Zmienność rozszerza widełki w obie strony, nie podnosi średniej.
-        const swing = 1 + (next() * 2 - 1) * att.damageSpread
+        swing = 1 + (next() * 2 - 1) * att.damageSpread
         damage = Math.max(0.5, att.power * swing * def.guardSoak * att.momentum)
         hp[defender] -= damage
         roundDamage[attacker] += damage
         totalDamage[attacker] += damage
       }
+
+      // Szklana szczęka rozstrzyga się przed zwykłym sprawdzeniem puli życia,
+      // bo pula może być jeszcze pełna — o nokaucie decyduje ciężar ciosu,
+      // nie to, ile życia zostało.
+      const glassJawKo = landed && round === 1 && glassJaw[defender] && swing >= att.heavySwing
+      if (glassJawKo) hp[defender] = 0
 
       events.push({
         type: 'punch',
@@ -360,13 +506,27 @@ export function simulateFight(fighterA: FighterInput, fighterB: FighterInput): F
         defenderHp: round2(Math.max(0, hp[defender])),
       })
 
+      if (glassJawKo) {
+        stopped = { winnerIndex: attacker, round, method: 'KO', knockdowns: knockdowns[defender] }
+        events.push({
+          type: 'glassJaw',
+          round,
+          fighter: side(defender),
+          concentrationPercent: fighters[defender].concentration.percent ?? 0,
+        })
+        events.push({ type: 'knockout', round, winner: side(attacker), countTo: 10 })
+        break
+      }
+
       if (hp[defender] <= 0) {
         stopped = { winnerIndex: attacker, round, method: 'KO', knockdowns: knockdowns[defender] }
         events.push({ type: 'knockout', round, winner: side(attacker), countTo: 10 })
         break
       }
 
-      if (landed && damage >= def.knockdownThreshold) {
+      // Nokdaun: ciężki cios w kogoś, kto jest już poobijany. Oba warunki
+      // deterministyczne — ciężar z ziarna, pula życia z przebiegu walki.
+      if (landed && swing >= att.heavySwing && hp[defender] < def.hurtThreshold) {
         knockdowns[defender]++
         if (knockdowns[defender] >= KNOCKDOWNS_FOR_TKO) {
           stopped = {
@@ -404,9 +564,6 @@ export function simulateFight(fighterA: FighterInput, fighterB: FighterInput): F
     scorecard[0] += score[0]
     scorecard[1] += score[1]
 
-    const bySide = <T>(values: readonly [T, T]): Record<Side, T> =>
-      ({ [side(0)]: values[0], [side(1)]: values[1] }) as Record<Side, T>
-
     const result: RoundResult = {
       round,
       score: bySide([score[0], score[1]]),
@@ -417,9 +574,6 @@ export function simulateFight(fighterA: FighterInput, fighterB: FighterInput): F
     rounds.push(result)
     events.push({ type: 'roundEnd', round, score: result.score, damage: result.damage })
   }
-
-  const bySide = <T>(values: readonly [T, T]): Record<Side, T> =>
-    ({ [side(0)]: values[0], [side(1)]: values[1] }) as Record<Side, T>
 
   let winnerIndex: 0 | 1 | null = null
   let method: FightMethod
@@ -461,6 +615,68 @@ export function simulateFight(fighterA: FighterInput, fighterB: FighterInput): F
     endedInRound: stopped?.round ?? null,
     scorecard: bySide([scorecard[0], scorecard[1]]),
     damageDealt: bySide([round2(totalDamage[0]), round2(totalDamage[1])]),
+    medicals,
+    events,
+  }
+}
+
+/**
+ * Wynik walki, której nie było: walkower albo odwołanie.
+ *
+ * Koncentracja podaży od 70% w górę znaczy, że dziesięć portfeli — już po
+ * odsianiu pul płynności, adresu spalania i kontraktu tokena — trzyma ponad
+ * dwie trzecie podaży dostępnej holderom. Taki zawodnik nie wchodzi do ringu.
+ * Gdy oblali obaj, nie ma z kim walczyć i nie ma zwycięzcy.
+ *
+ * Karta jest pusta, nie wyzerowana „na korzyść" kogokolwiek: walkower to brak
+ * walki, a nie wygrana 30–27. Pula życia jest wyliczona i podana mimo tego,
+ * bo front rysuje z niej paski jeszcze przed pierwszym dzwonkiem.
+ */
+function noContest(input: {
+  failed: readonly [boolean, boolean]
+  fighters: readonly [FighterInput, FighterInput]
+  profiles: readonly [CombatProfile, CombatProfile]
+  side: (i: 0 | 1) => Side
+  bySide: <T>(values: readonly [T, T]) => Record<Side, T>
+  medicals: Record<Side, ConcentrationVerdict>
+  seed: string
+  seedKey: string
+}): FightResult {
+  const { failed, fighters, profiles, side, bySide, medicals, seed, seedKey } = input
+  const percent = (i: 0 | 1) => fighters[i].concentration.percent ?? 0
+
+  const events: FightEvent[] = []
+  for (const i of [0, 1] as const) {
+    if (failed[i]) {
+      events.push({ type: 'medicalsFailed', fighter: side(i), concentrationPercent: percent(i) })
+    }
+  }
+
+  const bothFailed = failed[0] && failed[1]
+  let winnerIndex: 0 | 1 | null = null
+
+  if (bothFailed) {
+    events.push({
+      type: 'fightCancelled',
+      concentrationPercent: bySide([percent(0), percent(1)]),
+    })
+  } else {
+    winnerIndex = failed[0] ? 1 : 0
+    const loserIndex = (winnerIndex === 0 ? 1 : 0) as 0 | 1
+    events.push({ type: 'walkover', winner: side(winnerIndex), loser: side(loserIndex) })
+  }
+
+  return {
+    seed,
+    seedKey,
+    hpStart: bySide([round2(profiles[0].hpStart), round2(profiles[1].hpStart)]),
+    rounds: [],
+    winner: winnerIndex === null ? null : side(winnerIndex),
+    method: bothFailed ? 'cancelled' : 'walkover',
+    endedInRound: null,
+    scorecard: bySide([0, 0]),
+    damageDealt: bySide([0, 0]),
+    medicals,
     events,
   }
 }

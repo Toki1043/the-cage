@@ -32,12 +32,16 @@ import { drawFighter } from '@/lib/fighter-svg'
 import { drawReferee } from '@/lib/referee-svg'
 import {
   INSTRUCTIONS,
+  fightCancelledCall,
+  glassJawCall,
   judgesCall,
   knockdownCall,
   knockoutCall,
+  medicalsFailedCall,
   standUpCall,
   technicalCall,
   verdictLine,
+  walkoverCall,
 } from '@/lib/referee'
 import { count, ringsideRead, usd } from '@/lib/ringside'
 
@@ -92,9 +96,11 @@ const STAT_ROWS: readonly (readonly [keyof FightStats, string])[] = [
 const TIMING = {
   instructions: 1100,
   roundIntro: 900,
+  stepForward: 95,
   landedWindup: 165,
   landedImpact: 120,
   landedRecover: 85,
+  stepBack: 110,
   missWindup: 140,
   missRecover: 55,
   countEight: 110,
@@ -302,7 +308,10 @@ function drawVerdict(data: FightApiResponse) {
 
   const headline = document.createElement('p')
   headline.className = 'w'
-  if (fight.winner === null) {
+  if (fight.method === 'cancelled') {
+    // Odwołana walka nie jest remisem: remis to wynik, a tu wyniku nie ma.
+    headline.textContent = 'No contest'
+  } else if (fight.winner === null) {
     headline.textContent = 'Draw'
   } else {
     headline.textContent = `$${symbol(fight.winner)} wins`
@@ -447,11 +456,18 @@ function createRing(data: FightApiResponse, clock: Clock) {
     const defenderSide = other(event.attacker)
     const defender = need(`f-${defenderSide}`)
 
+    attacker.classList.add('step-forward')
+    await sleep(TIMING.stepForward)
+
     attacker.classList.add('punch')
 
     if (!event.landed) {
       await sleep(TIMING.missWindup)
       attacker.classList.remove('punch')
+      attacker.classList.add('step-back')
+      attacker.classList.remove('step-forward')
+      await sleep(TIMING.stepBack)
+      attacker.classList.remove('step-back')
       await sleep(TIMING.missRecover)
       return
     }
@@ -464,6 +480,10 @@ function createRing(data: FightApiResponse, clock: Clock) {
     await sleep(TIMING.landedImpact)
     attacker.classList.remove('punch')
     defender.classList.remove('hit')
+    attacker.classList.add('step-back')
+    attacker.classList.remove('step-forward')
+    await sleep(TIMING.stepBack)
+    attacker.classList.remove('step-back')
     await sleep(TIMING.landedRecover)
   }
 
@@ -511,6 +531,40 @@ function createRing(data: FightApiResponse, clock: Clock) {
   async function play(commentary: CommentaryLine[] | null) {
     for (const event of data.fight.events) {
       switch (event.type) {
+        // Badania przed pierwszym dzwonkiem. Zawodnik z koncentracją podaży
+        // od 70% w górę nie wchodzi do ringu — bez tych trzech gałęzi
+        // walkower byłby pustą animacją i werdyktem bez wyjaśnienia.
+        case 'medicalsFailed': {
+          setRoundTag('Pre-fight check')
+          panel.call = ''
+          panel.colour = ''
+          need(`f-${event.fighter}`).classList.add('down')
+          setRef(medicalsFailedCall(symbols[event.fighter], event.concentrationPercent))
+          refCue('talking', TIMING.instructions)
+          await sleep(TIMING.instructions)
+          break
+        }
+        case 'fightCancelled': {
+          setRoundTag('No contest')
+          setRef(fightCancelledCall(symbols.a, symbols.b))
+          refCue('waving', REF_WAVE_MS)
+          stamp('NO CONTEST')
+          await sleep(TIMING.stampHold)
+          break
+        }
+        case 'walkover': {
+          setRoundTag('Walkover')
+          setRef(walkoverCall(symbols[event.winner], symbols[event.loser]))
+          refCue('waving', REF_WAVE_MS)
+          stamp('W/O')
+          await sleep(TIMING.stampHold)
+          break
+        }
+        case 'glassJaw': {
+          setRef(glassJawCall(symbols[event.fighter], event.concentrationPercent))
+          refCue('waving', REF_WAVE_MS)
+          break
+        }
         case 'instructions': {
           setRoundTag('Instructions')
           panel.call = ''
@@ -591,6 +645,43 @@ function fillCorner(side: Side, token: TokenFightData) {
   need(`${side}-holders`).textContent = count(token.snapshot.holders)
   need(`${side}-age`).textContent = `${count(token.snapshot.pairAgeDays)}d`
   need(`${side}-weight`).textContent = WEIGHT_LABELS[token.weightClass.id]
+}
+
+/**
+ * Licznik obserwowanych portfeli w obu narożnikach.
+ *
+ * Front dostaje wyłącznie liczby: ile adresów z listy trzyma tokena i ile
+ * adresów jest na liście. Samej listy tu nie ma i nie może być — siedzi
+ * w zmiennej `TRACKED_WALLETS` po stronie serwera (`src/lib/tracked.ts`).
+ *
+ * Ułamek surowo, „3 of 40", bez etykiety w rodzaju „smart money": portfel na
+ * liście jest tam, bo ktoś go wpisał, nie bo cokolwiek udowodnił
+ * (CLAUDE.md § Narożnik: holderzy).
+ */
+function fillTracked(data: FightApiResponse) {
+  // Karta otwarta przed wdrożeniem trafia na odpowiedź bez tego pola. Bez
+  // zapasu rozpakowanie `undefined` wywraca cały przebieg walki na ozdobie.
+  const tracked = data.tracked ?? { configured: false, watched: 0, a: null, b: null, note: null }
+  const note = need('tracked-note')
+
+  for (const side of ['a', 'b'] as const) {
+    const row = need(`${side}-tracked-row`)
+    row.hidden = !tracked.configured
+    if (!tracked.configured) continue
+    const held = side === 'a' ? tracked.a : tracked.b
+    // Kreska, nie zero: nieudane sprawdzenie nie jest brakiem trafień.
+    need(`${side}-tracked`).textContent =
+      held === null ? '—' : `${count(held)} of ${count(tracked.watched)}`
+  }
+
+  note.hidden = !tracked.configured
+  if (!tracked.configured) return
+  note.textContent =
+    tracked.a === null && tracked.b === null
+      ? 'Watched wallets could not be checked this round. The fight is unaffected either way.'
+      : 'Watched wallets: addresses from a private server-side list holding this contract. ' +
+        'A count, not a signal — nobody here is labelled smart money, and it changes nothing ' +
+        'about the fight.'
 }
 
 /**
@@ -754,6 +845,7 @@ export default function Home() {
 
       fillCorner('a', data.tokenA)
       fillCorner('b', data.tokenB)
+      fillTracked(data)
       showMatchup(data)
       drawTape(data.tokenA, data.tokenB)
 
@@ -822,6 +914,9 @@ export default function Home() {
         Both corners fill themselves from the chain. Paste two contract addresses.
       </p>
       <p className="crossclass" id="crossclass" hidden />
+      {/* Jedno zdanie pod oba narożniki, a nie po jednym w każdym: ta sama
+          uwaga powtórzona dwa razy czyta się jak ostrzeżenie o czymś innym. */}
+      <p className="tracked-note" id="tracked-note" hidden />
 
       <section className="arena" id="arena" hidden>
         <div className="scoreboard">
@@ -850,9 +945,9 @@ export default function Home() {
           </div>
           <div className="stage">
             <div className="floor" />
-            <div className="referee" id="ref-fig" />
             <div className="fighter a" id="f-a" />
             <div className="fighter b" id="f-b" />
+            <div className="referee" id="ref-fig" />
           </div>
           <div className="flash" id="flash" />
           <div className="kostamp" id="kostamp" hidden>
@@ -934,6 +1029,13 @@ function Corner({ side, title }: { side: Side; title: string }) {
           <div>
             <dt>Pair age</dt>
             <dd id={`${side}-age`}>—</dd>
+          </div>
+          {/* Wiersz na całą szerokość i domyślnie schowany: bez listy
+              obserwowanych portfeli po stronie serwera nie ma tu czego
+              pokazać, a puste pole czyta się jak zero trafień. */}
+          <div className="wide" id={`${side}-tracked-row`} hidden>
+            <dt>Watched wallets</dt>
+            <dd id={`${side}-tracked`}>—</dd>
           </div>
         </dl>
         <p className="hint">Read from the chain, not typed. Snapshot taken when the bell rings.</p>
