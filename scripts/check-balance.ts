@@ -9,6 +9,7 @@
  */
 import { ROUNDS, simulateFight, type FighterInput, type FightMethod } from '../src/lib/fight.ts'
 import { concentrationUnavailable, concentrationVerdict } from '../src/lib/concentration.ts'
+import { holderGate } from '../src/lib/holder-gate.ts'
 import type { ChartModifiers } from '../src/lib/stats.ts'
 
 const COUNT = Number(process.argv[2] ?? 100)
@@ -48,6 +49,10 @@ function fighter(index: number, tag: 'a' | 'b'): FighterInput {
       szybkosc: Math.round(rnd() * 100),
     },
     modifiers: modifiers(Math.round(rnd() * 300) / 100),
+    // Podatność po całej skali, tak jak statystyki — ta sama zasada co
+    // w `verify:fight`. Bramka przepuszcza: liczy się rozkład samych walk.
+    vulnerability: Math.round(rnd() * 100),
+    holderGate: holderGate(10_000),
     concentration: clear,
   }
 }

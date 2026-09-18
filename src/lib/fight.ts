@@ -12,6 +12,7 @@
  * bit w bit ten sam przebieg.
  */
 import type { ConcentrationVerdict } from './concentration'
+import type { HolderGate } from './holder-gate'
 import type { ChartModifiers, FightStats } from './stats'
 
 /** Trzy rundy — patrz CLAUDE.md § Sędzia. */
@@ -25,6 +26,16 @@ export interface FighterInput {
   symbol: string
   stats: FightStats
   modifiers: ChartModifiers
+  /**
+   * Podatność 0–100: kapitalizacja / płynność (szklana szczęka). Zmniejsza
+   * pulę życia i zwiększa obrażenia przyjmowane. Nie jest statystyką bojową.
+   */
+  vulnerability: number
+  /**
+   * Bramka na liczbie holderów. Nie przeszła — walkower, bez względu na
+   * statystyki. Działa na darmowym planie Codexu.
+   */
+  holderGate: HolderGate
   /**
    * Pasmo koncentracji podaży, policzone po odsianiu adresów niebędących
    * holderami. `enforced: false` znaczy, że odsiewu nie dało się zrobić —
@@ -118,8 +129,18 @@ export function seededRandom(key: string): { next: () => number; seed: string } 
  * to `npm run verify:fight`.
  */
 const BALANCE = {
-  /** Pula życia: wytrzymałość 0 → 150, 100 → 250. */
-  hpBase: 150,
+  /**
+   * Pula życia: wytrzymałość 0 → 180, 100 → 280.
+   *
+   * Było 150. Podatność zabiera życie i podbija przyjmowane obrażenia, a token
+   * z realnym stosunkiem kapitalizacji do płynności ma ją zwykle w środku skali,
+   * więc średnio każdy zawodnik jest teraz słabszy o kilkanaście procent.
+   * Przy 150 nokauty skakały z 14% do 35% walk, a nokdauny z 27% do 45%.
+   * 180 przywraca rozkład sprzed podatności (nokaut 14,0%, nokdaun 28,3%,
+   * TKO 1,5% na 1500 par z losową podatnością) i prawie nie rusza względnej
+   * wagi wytrzymałości: 82% → 80% w pojedynku 80 vs 20.
+   */
+  hpBase: 180,
   /** Spadek od szczytu zabiera najwyżej czwartą część życia. */
   drawdownHpPenalty: 0.25,
   /** Ciosy na rundę: szybkość 0 → 8, 100 → 16. */
@@ -158,6 +179,20 @@ const BALANCE = {
    */
   concentrationHpPenalty: 0.2,
   /**
+   * Podatność (kapitalizacja / płynność) 100 zabiera 15% puli życia i dodaje
+   * 15% do przyjmowanych obrażeń.
+   *
+   * Dwie dźwignie, a nie jedna, bo tak brzmi definicja: mało płynności pod
+   * dużą kapitalizacją to i mniej miejsca na przyjęcie ciosów, i mocniejszy
+   * skutek każdego z nich. Obie liczone od tej samej liczby, więc jedna
+   * statystyka nadal ma jedno źródło — zmieniają się tylko dwa wyjścia.
+   * Wartości dobrane pomiarem: w pojedynku podatność 20 vs 80 daje 70% dla
+   * mniej podatnego, czyli tyle co garda (75%) i mniej niż siła (90%). To ma
+   * być modyfikator, nie piąta dźwignia — patrz `npm run verify:fight`.
+   */
+  vulnerabilityHpPenalty: 0.15,
+  vulnerabilityDamageTaken: 0.15,
+  /**
    * Co znaczy „ciężki cios": górna połowa widełek atakującego, czyli górna
    * ćwiartka wszystkich jego trafień. Jedna definicja dla nokdaunu i dla
    * szklanej szczęki.
@@ -188,7 +223,9 @@ const BALANCE = {
    * jednego dobrego ciosu w pełni sił, tylko od dobrego ciosu w kogoś, kto
    * już stoi na miękkich nogach.
    *
-   * Wartość dobrana pomiarem na 1000 par, nie z wyczucia. Próg przekłada się
+   * Wartość dobrana pomiarem na 1000 par, nie z wyczucia (tabela poniżej jest
+   * sprzed podatności; po jej dodaniu 0,25 nadal daje 28,3% — patrz `hpBase`).
+   * Próg przekłada się
    * na odsetek walk z nokdaunem monotonicznie i ostro:
    *
    *     0,10 →  8,6% walk (TKO 0,0%)     0,25 → 27,0% walk (TKO 1,8%)
@@ -232,9 +269,12 @@ const round2 = (n: number) => Math.round(n * 100) / 100
  * statystyki. Jedna statystyka, jedna dźwignia:
  *
  * - wytrzymałość (płynność) → pula punktów życia
- * - siła (kapitalizacja / płynność) → obrażenia trafionego ciosu
+ * - siła (obrót 24h) → obrażenia trafionego ciosu
  * - garda (holderzy) → pochłanianie przyjmowanych obrażeń
  * - szybkość (świeżość pary) → tempo, czyli liczba ciosów w rundzie
+ *
+ * Podatność (kapitalizacja / płynność) nie jest statystyką, więc nie ma tu
+ * „swojej" dźwigni: zabiera część puli życia i podbija przyjmowane obrażenia.
  *
  * Modyfikatory z wykresu:
  *
@@ -248,6 +288,8 @@ export interface CombatProfile {
   accuracy: number
   power: number
   guardSoak: number
+  /** Mnożnik przyjmowanych obrażeń z podatności: 1 przy zerowej, do 1,25. */
+  damageTaken: number
   damageSpread: number
   momentum: number
   /**
@@ -276,10 +318,16 @@ export function combatProfile(fighter: FighterInput): CombatProfile {
   const drawdown = quantize(clamp01(drawdownFromPeakClose ?? 0))
   const change24h = quantize(clamp(priceChange24h ?? 0, -0.5, 0.5))
 
+  // Podatność jest już liczbą całkowitą 0–100 (`clampStat`), więc drgania
+  // płynności między zapytaniami przechodzą przez nią tak samo jak przez
+  // statystyki — nie trzeba jej kwantyzować drugi raz.
+  const vulnerability = clamp01(fighter.vulnerability / 100)
+
   const hpStart =
     (BALANCE.hpBase + wytrzymalosc) *
     (1 - BALANCE.drawdownHpPenalty * drawdown) *
-    (1 - BALANCE.concentrationHpPenalty * concentrationPenalty)
+    (1 - BALANCE.concentrationHpPenalty * concentrationPenalty) *
+    (1 - BALANCE.vulnerabilityHpPenalty * vulnerability)
 
   return {
     hpStart,
@@ -287,6 +335,7 @@ export function combatProfile(fighter: FighterInput): CombatProfile {
     accuracy: BALANCE.accuracyBase * (1 - BALANCE.accuracyVolatilityPenalty * volNorm),
     power: BALANCE.powerBase + (sila / 100) * BALANCE.powerFromStrength,
     guardSoak: 1 - (garda / 100) * BALANCE.guardSoakMax,
+    damageTaken: 1 + vulnerability * BALANCE.vulnerabilityDamageTaken,
     damageSpread:
       BALANCE.damageSpreadBase + BALANCE.damageSpreadFromVolatility * volNorm,
     momentum: 1 + change24h * BALANCE.momentumFrom24h,
@@ -302,14 +351,19 @@ export function combatProfile(fighter: FighterInput): CombatProfile {
 /* Przebieg walki                                                      */
 /* ------------------------------------------------------------------ */
 
+/** Dlaczego zawodnik nie przeszedł badań. */
+export type MedicalFailure = 'holders' | 'concentration'
+
 export type FightEvent =
   /**
-   * Badania przed walką: koncentracja podaży od 70% w górę i zawodnik nie
-   * wchodzi do ringu. Nie ma tu losowania — pasmo wyszło z liczby.
+   * Badania przed walką: zawodnik nie wchodzi do ringu. Nie ma tu losowania —
+   * wynik wyszedł z liczby. Dwa powody: mniej holderów niż próg (`holders`)
+   * albo koncentracja podaży od 70% w górę (`concentration`).
    */
-  | { type: 'medicalsFailed'; fighter: Side; concentrationPercent: number }
+  | { type: 'medicalsFailed'; fighter: Side; reason: 'holders'; holders: number; minHolders: number }
+  | { type: 'medicalsFailed'; fighter: Side; reason: 'concentration'; concentrationPercent: number }
   /** Obaj oblali badania — nie ma z kim walczyć, walka odwołana. */
-  | { type: 'fightCancelled'; concentrationPercent: Record<Side, number> }
+  | { type: 'fightCancelled'; reasons: Record<Side, MedicalFailure> }
   /** Jeden oblał, drugi bierze walkower. */
   | { type: 'walkover'; winner: Side; loser: Side }
   /** Sędzia daje instrukcje przed pierwszą rundą. */
@@ -382,6 +436,8 @@ export interface FightResult {
    * albo czemu w ogóle nie wszedł do ringu.
    */
   medicals: Record<Side, ConcentrationVerdict>
+  /** Wynik bramki na holderach obu stron — z liczbą, z której wyszedł. */
+  holderGates: Record<Side, HolderGate>
   events: FightEvent[]
 }
 
@@ -431,24 +487,33 @@ export function simulateFight(fighterA: FighterInput, fighterB: FighterInput): F
     ({ [side(0)]: values[0], [side(1)]: values[1] }) as Record<Side, T>
 
   const medicals = bySide([fighters[0].concentration, fighters[1].concentration])
+  const holderGates = bySide([fighters[0].holderGate, fighters[1].holderGate])
 
-  // Badania przed pierwszym dzwonkiem. Koncentracja podaży od 70% w górę
-  // i zawodnik nie wchodzi do ringu — nie ma tu ani losowania, ani wyboru:
-  // pasmo wyszło z liczby policzonej na saldach po odsiewie. Bez odsiewu
-  // pasmo jest `clear` i badania przechodzą obaj (patrz `concentration.ts`).
-  const failedMedicals = [
-    fighters[0].concentration.enforced && fighters[0].concentration.band === 'failed',
-    fighters[1].concentration.enforced && fighters[1].concentration.band === 'failed',
-  ] as const
+  // Badania przed pierwszym dzwonkiem. Zawodnik, który ich nie przejdzie, nie
+  // wchodzi do ringu — nie ma tu ani losowania, ani wyboru, tylko liczba:
+  //
+  //  1. Liczba holderów poniżej progu. Działa zawsze, bo Codex podaje ją za
+  //     darmo. Sprawdzana pierwsza: to twardsza bramka, bo nie zależy od planu.
+  //  2. Koncentracja podaży od 70% w górę, policzona na saldach po odsiewie.
+  //     Bez odsiewu pasmo jest `clear` i ta bramka przepuszcza (`concentration.ts`).
+  //
+  // Zawodnik z obiema wadami dostaje pierwszą z nich — jeden powód na osobę.
+  const failure = (f: FighterInput): MedicalFailure | null => {
+    if (!f.holderGate.passed) return 'holders'
+    if (f.concentration.enforced && f.concentration.band === 'failed') return 'concentration'
+    return null
+  }
+  const failures = [failure(fighters[0]), failure(fighters[1])] as const
 
-  if (failedMedicals[0] || failedMedicals[1]) {
+  if (failures[0] || failures[1]) {
     return noContest({
-      failed: failedMedicals,
+      failures,
       fighters,
       profiles,
       side,
       bySide,
       medicals,
+      holderGates,
       seed,
       seedKey: key,
     })
@@ -485,7 +550,10 @@ export function simulateFight(fighterA: FighterInput, fighterB: FighterInput): F
       if (landed) {
         // Zmienność rozszerza widełki w obie strony, nie podnosi średniej.
         swing = 1 + (next() * 2 - 1) * att.damageSpread
-        damage = Math.max(0.5, att.power * swing * def.guardSoak * att.momentum)
+        damage = Math.max(
+          0.5,
+          att.power * swing * def.guardSoak * def.damageTaken * att.momentum,
+        )
         hp[defender] -= damage
         roundDamage[attacker] += damage
         totalDamage[attacker] += damage
@@ -553,7 +621,7 @@ export function simulateFight(fighterA: FighterInput, fighterB: FighterInput): F
     // Liczy się **udział** w puli życia przeciwnika, nie same obrażenia.
     // Inaczej wytrzymałość nie miała żadnego wpływu na wynik na punkty —
     // większa pula chroniła tylko przed nokautem, a karta jej nie widziała.
-    // Zabrać komuś 30 ze 150 to nie to samo co 30 z 250.
+    // Zabrać komuś 30 ze 180 to nie to samo co 30 z 280.
     const share = [roundDamage[0] / profiles[1].hpStart, roundDamage[1] / profiles[0].hpStart]
 
     const score = [10, 10]
@@ -616,6 +684,7 @@ export function simulateFight(fighterA: FighterInput, fighterB: FighterInput): F
     scorecard: bySide([scorecard[0], scorecard[1]]),
     damageDealt: bySide([round2(totalDamage[0]), round2(totalDamage[1])]),
     medicals,
+    holderGates,
     events,
   }
 }
@@ -623,9 +692,9 @@ export function simulateFight(fighterA: FighterInput, fighterB: FighterInput): F
 /**
  * Wynik walki, której nie było: walkower albo odwołanie.
  *
- * Koncentracja podaży od 70% w górę znaczy, że dziesięć portfeli — już po
- * odsianiu pul płynności, adresu spalania i kontraktu tokena — trzyma ponad
- * dwie trzecie podaży dostępnej holderom. Taki zawodnik nie wchodzi do ringu.
+ * Zawodnik nie wchodzi do ringu, gdy ma mniej holderów niż próg albo gdy
+ * dziesięć portfeli — już po odsianiu pul płynności, adresu spalania i
+ * kontraktu tokena — trzyma ponad dwie trzecie podaży dostępnej holderom.
  * Gdy oblali obaj, nie ma z kim walczyć i nie ma zwycięzcy.
  *
  * Karta jest pusta, nie wyzerowana „na korzyść" kogokolwiek: walkower to brak
@@ -633,32 +702,49 @@ export function simulateFight(fighterA: FighterInput, fighterB: FighterInput): F
  * bo front rysuje z niej paski jeszcze przed pierwszym dzwonkiem.
  */
 function noContest(input: {
-  failed: readonly [boolean, boolean]
+  failures: readonly [MedicalFailure | null, MedicalFailure | null]
   fighters: readonly [FighterInput, FighterInput]
   profiles: readonly [CombatProfile, CombatProfile]
   side: (i: 0 | 1) => Side
   bySide: <T>(values: readonly [T, T]) => Record<Side, T>
   medicals: Record<Side, ConcentrationVerdict>
+  holderGates: Record<Side, HolderGate>
   seed: string
   seedKey: string
 }): FightResult {
-  const { failed, fighters, profiles, side, bySide, medicals, seed, seedKey } = input
+  const { failures, fighters, profiles, side, bySide, medicals, holderGates, seed, seedKey } = input
   const percent = (i: 0 | 1) => fighters[i].concentration.percent ?? 0
 
   const events: FightEvent[] = []
   for (const i of [0, 1] as const) {
-    if (failed[i]) {
-      events.push({ type: 'medicalsFailed', fighter: side(i), concentrationPercent: percent(i) })
+    const reason = failures[i]
+    if (reason === 'holders') {
+      events.push({
+        type: 'medicalsFailed',
+        fighter: side(i),
+        reason,
+        holders: fighters[i].holderGate.holders,
+        minHolders: fighters[i].holderGate.minHolders,
+      })
+    } else if (reason === 'concentration') {
+      events.push({
+        type: 'medicalsFailed',
+        fighter: side(i),
+        reason,
+        concentrationPercent: percent(i),
+      })
     }
   }
 
+  const failed = [failures[0] !== null, failures[1] !== null] as const
   const bothFailed = failed[0] && failed[1]
   let winnerIndex: 0 | 1 | null = null
 
   if (bothFailed) {
     events.push({
       type: 'fightCancelled',
-      concentrationPercent: bySide([percent(0), percent(1)]),
+      // Oba wpisy są niepuste: `bothFailed` znaczy, że oblali obaj.
+      reasons: bySide([failures[0] as MedicalFailure, failures[1] as MedicalFailure]),
     })
   } else {
     winnerIndex = failed[0] ? 1 : 0
@@ -677,6 +763,7 @@ function noContest(input: {
     scorecard: bySide([0, 0]),
     damageDealt: bySide([0, 0]),
     medicals,
+    holderGates,
     events,
   }
 }

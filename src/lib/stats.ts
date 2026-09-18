@@ -10,6 +10,8 @@
 export interface RawTokenNumbers {
   liquidityUsd: number
   marketCapUsd: number
+  /** Obrót z ostatnich 24h na parze referencyjnej, w dolarach. */
+  volume24hUsd: number
   holders: number
   /** Wiek pary w dniach; może być ułamkowy. */
   ageDays: number
@@ -30,8 +32,10 @@ export interface FightStats {
 export const STAT_SCALE = {
   /** $1k → 0, $100M → 100 */
   wytrzymalosc: { minLog: 3, decades: 5 },
-  /** 1x → 0, 1000x → 100 */
-  sila: { decades: 3 },
+  /** Obrót 24h — te same progi co wytrzymałość: $1k → 0, $100M → 100 */
+  sila: { minLog: 3, decades: 5 },
+  /** Kapitalizacja / płynność: 1x → 0, 1000x → 100. To podatność, nie siła. */
+  vulnerability: { decades: 3 },
   /** 10 holderów → 0, 1M → 100 */
   garda: { minLog: 1, decades: 5 },
   /** dziś → 100, 2 lata → 0 */
@@ -53,11 +57,11 @@ export function clampStat(value: number): number {
 /**
  * Cztery statystyki bojowe, każda znormalizowana do 0–100.
  *
- * Kontrola poprawności (CLAUDE.md): token AI — płynność $2,13M,
- * kapitalizacja $273,4M, 46 755 holderów, 56 dni → 67 / 70 / 73 / 39.
+ * Kontrola poprawności (CLAUDE.md): token AI — płynność $2,13M, obrót 24h
+ * $1M (liczba wzorcowa, nie pomiar), 46 755 holderów, 56 dni → 67 / 60 / 73 / 39.
  */
 export function computeStats(raw: RawTokenNumbers): FightStats {
-  const { liquidityUsd, marketCapUsd, holders, ageDays } = raw
+  const { liquidityUsd, volume24hUsd, holders, ageDays } = raw
 
   // Wytrzymałość: głębokość płynności. Ile ring wytrzyma, zanim się ugnie.
   const wytrzymalosc =
@@ -65,8 +69,12 @@ export function computeStats(raw: RawTokenNumbers): FightStats {
       STAT_SCALE.wytrzymalosc.decades) *
     100
 
-  // Siła: kapitalizacja / płynność — ile papieru stoi za każdym dolarem wyjścia.
-  const sila = (Math.log10(marketCapUsd / liquidityUsd) / STAT_SCALE.sila.decades) * 100
+  // Siła: obrót 24h — ile pieniędzy faktycznie przechodzi przez ring w ciągu doby.
+  // Kapitalizacja / płynność tu nie wchodzi: to miara ryzyka, nie siły. Token bez
+  // płynności dostawał przez nią maksimum i wygrywał ze zdrowym. Liczy się jako
+  // podatność, patrz `computeVulnerability`.
+  const sila =
+    ((Math.log10(volume24hUsd) - STAT_SCALE.sila.minLog) / STAT_SCALE.sila.decades) * 100
 
   // Garda: rozproszenie podaży mierzone liczbą holderów.
   const garda =
@@ -83,6 +91,28 @@ export function computeStats(raw: RawTokenNumbers): FightStats {
     garda: clampStat(garda),
     szybkosc: clampStat(szybkosc),
   }
+}
+
+/**
+ * Podatność (szklana szczęka): ile papieru stoi za każdym dolarem wyjścia,
+ * skala 0–100 — 1x → 0, 1000x → 100.
+ *
+ * To dawna „siła", odwrócona co do znaku: wysoki stosunek kapitalizacji do
+ * płynności oznacza, że niewielki ruch po stronie sprzedaży przesuwa cenę
+ * mocno. W symulacji zmniejsza pulę życia i zwiększa obrażenia przyjmowane,
+ * a nie podnosi żadnej statystyki. Nie jest piątą statystyką bojową — tak samo
+ * jak spadek od szczytu jest modyfikatorem, a kapitalizacja kategorią.
+ *
+ * Sztywne progi, bez odniesienia do przeciwnika. Zerowa płynność przy dodatniej
+ * kapitalizacji daje `Infinity`, czyli sufit 100; brak obu liczb daje `NaN`,
+ * które `clampStat` sprowadza do 0.
+ */
+export function computeVulnerability(
+  raw: Pick<RawTokenNumbers, 'liquidityUsd' | 'marketCapUsd'>,
+): number {
+  return clampStat(
+    (Math.log10(raw.marketCapUsd / raw.liquidityUsd) / STAT_SCALE.vulnerability.decades) * 100,
+  )
 }
 
 /* ------------------------------------------------------------------ */

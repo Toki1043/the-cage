@@ -11,6 +11,7 @@ import {
   type FighterInput,
 } from '../src/lib/fight.ts'
 import { concentrationVerdict, type Concentration } from '../src/lib/concentration.ts'
+import { holderGate } from '../src/lib/holder-gate.ts'
 import type { ChartModifiers, FightStats } from '../src/lib/stats.ts'
 
 let failed = 0
@@ -59,35 +60,45 @@ const conc = (over: Partial<Concentration> = {}): Concentration => ({
   ...over,
 })
 
+/**
+ * Podatność domyślnie 0, a holderów tyle, żeby bramka przepuszczała — testy,
+ * które nie dotyczą tych dwóch mechanik, nie mogą się o nie potknąć.
+ */
 const fighter = (
   address: string,
   symbol: string,
   stats: FightStats,
   over: Partial<ChartModifiers> = {},
   concentration: Concentration = conc(),
+  extra: { vulnerability?: number; holders?: number } = {},
 ): FighterInput => ({
   address,
   symbol,
   stats,
   modifiers: mods(over),
+  vulnerability: extra.vulnerability ?? 0,
+  holderGate: holderGate(extra.holders ?? 10_000),
   concentration: concentrationVerdict(concentration),
 })
 
 
-// Realne statystyki z żywego API: AI i WETH na parach referencyjnych.
+// Statystyki z żywego API: AI i WETH na parach referencyjnych. Wytrzymałość,
+// garda i szybkość są pomiarem; `sila` jest tu liczbą fixture'a (siła liczy się
+// teraz z obrotu 24h, a tego pomiaru nie ma), a podatność to dawna „siła" z tych
+// samych pomiarów — kapitalizacja / płynność.
 const AI = fighter('0x2e8c31162b855a2ffa90f6f8634643ad6f111e18', 'AI', {
   wytrzymalosc: 71,
   sila: 63,
   garda: 73,
   szybkosc: 37,
-}, { volatility: 2.7792, drawdownFromPeakClose: 0.0817, priceChange24h: -0.083 })
+}, { volatility: 2.7792, drawdownFromPeakClose: 0.0817, priceChange24h: -0.083 }, conc(), { vulnerability: 63 })
 
 const WETH = fighter('0x0bd7d308f8e1639fab988df18a8011f41eacad73', 'WETH', {
   wytrzymalosc: 84,
   sila: 28,
   garda: 95,
   szybkosc: 34,
-}, { volatility: 0.5325, drawdownFromPeakClose: 0.0429, priceChange24h: -0.0167 })
+}, { volatility: 0.5325, drawdownFromPeakClose: 0.0429, priceChange24h: -0.0167 }, conc(), { vulnerability: 28 })
 
 console.log('\n== Ziarno ==')
 check('klucz sortuje adresy', seedKey('0xbbb', '0xaaa'), '0xaaa|0xbbb')
@@ -172,6 +183,17 @@ check('wyższa siła = mocniejszy cios', strong.power > weak.power, true)
 check('wyższa szybkość = wyższe tempo', strong.tempo > weak.tempo, true)
 check('wyższa garda = mniej obrażeń przyjętych', strong.guardSoak < weak.guardSoak, true)
 
+// Podatność (szklana szczęka): mniej życia i więcej przyjmowanych obrażeń.
+// Nie ma własnej statystyki — to modyfikator, jak spadek od szczytu.
+const sturdyJaw = combatProfile(fighter('0x1', 'J0', { wytrzymalosc: 80, sila: 50, garda: 50, szybkosc: 50 }, { volatility: 0 }, conc(), { vulnerability: 0 }))
+const glassJaw = combatProfile(fighter('0x1', 'J1', { wytrzymalosc: 80, sila: 50, garda: 50, szybkosc: 50 }, { volatility: 0 }, conc(), { vulnerability: 100 }))
+check('podatność 0 nie rusza życia ani obrażeń', [sturdyJaw.hpStart, sturdyJaw.damageTaken], [260, 1])
+check('podatność obniża życie', glassJaw.hpStart < sturdyJaw.hpStart, true)
+check('podatność 100 zabiera 15% życia', Math.round((1 - glassJaw.hpStart / sturdyJaw.hpStart) * 100), 15)
+check('podatność zwiększa obrażenia przyjmowane', glassJaw.damageTaken > sturdyJaw.damageTaken, true)
+check('podatność 100 dodaje 15% obrażeń', glassJaw.damageTaken, 1.15)
+check('podatność nie rusza siły ciosu ani tempa', [glassJaw.power, glassJaw.tempo], [sturdyJaw.power, sturdyJaw.tempo])
+
 // Spadek od szczytu: token daleko od szczytu wchodzi poobijany.
 const fresh = combatProfile(fighter('0x1', 'F', { wytrzymalosc: 80, sila: 50, garda: 50, szybkosc: 50 }, { drawdownFromPeakClose: 0 }))
 const beaten = combatProfile(fighter('0x1', 'B', { wytrzymalosc: 80, sila: 50, garda: 50, szybkosc: 50 }, { drawdownFromPeakClose: 1 }))
@@ -220,6 +242,8 @@ const bare: FighterInput = {
   symbol: 'BARE',
   stats: { wytrzymalosc: 0, sila: 0, garda: 0, szybkosc: 0 },
   modifiers: mods({ volatility: null, drawdownFromPeakClose: null, priceChange24h: null }),
+  vulnerability: 0,
+  holderGate: holderGate(10_000),
   concentration: concentrationVerdict(conc()),
 }
 const bareFight = simulateFight(bare, AI)
@@ -261,9 +285,11 @@ let knockdownsTotal = 0
 const seenMethods = new Set<string>()
 const winners = new Set<string>()
 for (let i = 0; i < N; i++) {
+  // Podatność losowana po całej skali, tak jak statystyki — realne tokeny
+  // siedzą raczej w środku, więc to rozrzut szerszy niż w produkcji.
   const r = simulateFight(
-    fighter(addr(i * 2), 'X', randStats(), { volatility: rnd() * 3 }),
-    fighter(addr(i * 2 + 1), 'Y', randStats(), { volatility: rnd() * 3 }),
+    fighter(addr(i * 2), 'X', randStats(), { volatility: rnd() * 3 }, conc(), { vulnerability: Math.round(rnd() * 100) }),
+    fighter(addr(i * 2 + 1), 'Y', randStats(), { volatility: rnd() * 3 }, conc(), { vulnerability: Math.round(rnd() * 100) }),
   )
   if (r.method === 'KO' || r.method === 'TKO') early++
   if (r.method === 'TKO') tkos++
@@ -321,6 +347,30 @@ console.log(`     wpływ 80 vs 20: ${Object.entries(influence).map(([k, v]) => `
 check('każda statystyka daje realną przewagę', infl.every((v) => v > 60), true)
 check('żadna statystyka nie decyduje sama', infl.every((v) => v < 95), true)
 check('rozrzut wpływu poniżej 25 punktów', Math.max(...infl) - Math.min(...infl) < 25, true)
+
+// Podatność nie jest statystyką, więc mierzymy ją osobno i po odwrotnej stronie:
+// mniejsza jest lepsza. Ma być odczuwalna, ale słabsza od statystyk — to
+// modyfikator, jak spadek od szczytu, a nie piąta dźwignia. Gdyby przewyższała
+// najsilniejszą statystykę, wracalibyśmy do sytuacji, w której jedna wielkość
+// z kapitalizacji i płynności rozstrzyga walkę.
+let vulnWins = 0
+let vulnTotal = 0
+for (let i = 0; i < 600; i++) {
+  const same = { wytrzymalosc: 50, sila: 50, garda: 50, szybkosc: 50 }
+  const r = simulateFight(
+    fighter(addr(i * 2 + 900_000), 'SOLID', same, {}, conc(), { vulnerability: 20 }),
+    fighter(addr(i * 2 + 900_001), 'GLASS', same, {}, conc(), { vulnerability: 80 }),
+  )
+  if (r.winner !== null) {
+    vulnTotal++
+    // Mniej podatny jest zawsze stroną `a` — kolejność wejścia nie zmienia wyniku.
+    if (r.winner === 'a') vulnWins++
+  }
+}
+const vulnInfluence = (vulnWins / vulnTotal) * 100
+console.log(`     wpływ podatności 20 vs 80: ${vulnInfluence.toFixed(0)}% dla mniej podatnego`)
+check('mniejsza podatność daje przewagę', vulnInfluence > 55, true)
+check('podatność słabsza od najsilniejszej statystyki', vulnInfluence < Math.max(...infl), true)
 
 // Krzywa: równy pojedynek ma być niepewny, duża przewaga niemal pewna.
 // Inaczej albo ranking jest szumem, albo animacja nie ma stawki.

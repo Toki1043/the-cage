@@ -30,6 +30,17 @@ export function medicalsFailedCall(symbol: string, percent: number): string {
   )
 }
 
+/**
+ * Badania oblane na liczbie holderów. Zdanie podaje liczbę i próg, bez oceny
+ * tokena i bez wniosków o jego przyszłości.
+ */
+export function holdersFailedCall(symbol: string, holders: number, minHolders: number): string {
+  return (
+    `$${symbol} does not pass the pre-fight check: ${holders.toLocaleString('en-US')} holders, ` +
+    `and the minimum to enter the ring is ${minHolders.toLocaleString('en-US')}. Withdrawn from the card.`
+  )
+}
+
 /** Obaj oblali badania — nie ma z kim walczyć. */
 export function fightCancelledCall(a: string, b: string): string {
   return `Both $${a} and $${b} fail the pre-fight check. No contest, the card is off.`

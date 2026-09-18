@@ -6,6 +6,7 @@ import {
   WEIGHT_CLASSES,
   computeChartModifiers,
   computeStats,
+  computeVulnerability,
   latestClose,
   matchup,
   sortPairsByLiquidity,
@@ -22,52 +23,80 @@ function check(label: string, actual: unknown, expected: unknown) {
   console.log(`${ok ? 'OK  ' : 'FAIL'} ${label}${ok ? ` = ${a}` : `\n       oczekiwano ${e}\n       otrzymano  ${a}`}`)
 }
 
+// Stałe wejście dla punktów kotwiczących: zmieniamy jedną wielkość naraz.
+const base = { liquidityUsd: 1_000, marketCapUsd: 1_000, volume24hUsd: 1_000, holders: 10, ageDays: 0 }
+const stats = (over: Partial<typeof base>) => computeStats({ ...base, ...over })
+
 console.log('\n== Kontrola z CLAUDE.md: token AI (Artificial Inu) ==')
-// płynność $2,13M, kapitalizacja $273,4M, 46 755 holderów, 56 dni
+// płynność $2,13M, obrót 24h $1M, kapitalizacja $273,4M, 46 755 holderów, 56 dni
+//
+// Obrót $1M to liczba wzorcowa, nie pomiar: CLAUDE.md nie podaje obrotu AI,
+// a obrót 24h zmienia się z godziny na godzinę, więc żywe API i tak da co innego.
+// Kontrola sprawdza implementację wzorów przy podanych wejściach. Wcześniej
+// siła wychodziła tu 70 — tyle wynosi teraz podatność, ten sam wzór o innej roli.
 //
 // Te wejścia opisują jedną konkretną parę AI: tę z WETH, utworzoną 22.07.2026.
 // Od kiedy parę referencyjną wybieramy deterministycznie po największej
-// płynności, dla AI wygrywa para z NVDA ($3,6M, 14.07.2026) i żywe API daje
-// 71/63/73/37, nie 67/70/73/39.
-//
-// To nie jest sprzeczność: ta kontrola sprawdza implementację wzorów przy
-// podanych wejściach i nadal musi dawać 67/70/73/39. Wybór pary sprawdza
+// płynności, dla AI wygrywa para z NVDA ($3,6M, 14.07.2026), więc żywe API daje
+// inne liczby niż te. To nie jest sprzeczność. Wybór pary sprawdza
 // `sortPairsByLiquidity` niżej i npm run verify:determinism na żywym API.
-const ai = computeStats({
+const aiRaw = {
   liquidityUsd: 2_130_000,
   marketCapUsd: 273_400_000,
+  volume24hUsd: 1_000_000,
   holders: 46_755,
   ageDays: 56,
-})
-check('statystyki AI', ai, { wytrzymalosc: 67, sila: 70, garda: 73, szybkosc: 39 })
+}
+const ai = computeStats(aiRaw)
+check('statystyki AI', ai, { wytrzymalosc: 67, sila: 60, garda: 73, szybkosc: 39 })
+check('podatność AI (dawna „siła" 70)', computeVulnerability(aiRaw), 70)
 
 console.log('\n== Punkty kotwiczące skali ==')
-check('płynność $1k → wytrzymałość 0', computeStats({ liquidityUsd: 1_000, marketCapUsd: 1_000, holders: 10, ageDays: 0 }).wytrzymalosc, 0)
-check('płynność $100M → wytrzymałość 100', computeStats({ liquidityUsd: 100_000_000, marketCapUsd: 100_000_000, holders: 10, ageDays: 0 }).wytrzymalosc, 100)
-check('mcap/płynność 1x → siła 0', computeStats({ liquidityUsd: 1_000_000, marketCapUsd: 1_000_000, holders: 10, ageDays: 0 }).sila, 0)
-check('mcap/płynność 1000x → siła 100', computeStats({ liquidityUsd: 1_000_000, marketCapUsd: 1_000_000_000, holders: 10, ageDays: 0 }).sila, 100)
-check('10 holderów → garda 0', computeStats({ liquidityUsd: 1_000, marketCapUsd: 1_000, holders: 10, ageDays: 0 }).garda, 0)
-check('1M holderów → garda 100', computeStats({ liquidityUsd: 1_000, marketCapUsd: 1_000, holders: 1_000_000, ageDays: 0 }).garda, 100)
-check('0 dni → szybkość 100', computeStats({ liquidityUsd: 1_000, marketCapUsd: 1_000, holders: 10, ageDays: 0 }).szybkosc, 100)
-check('730 dni → szybkość 0', computeStats({ liquidityUsd: 1_000, marketCapUsd: 1_000, holders: 10, ageDays: 730 }).szybkosc, 0)
+check('płynność $1k → wytrzymałość 0', stats({ liquidityUsd: 1_000 }).wytrzymalosc, 0)
+check('płynność $100M → wytrzymałość 100', stats({ liquidityUsd: 100_000_000 }).wytrzymalosc, 100)
+check('obrót 24h $1k → siła 0', stats({ volume24hUsd: 1_000 }).sila, 0)
+check('obrót 24h $100M → siła 100', stats({ volume24hUsd: 100_000_000 }).sila, 100)
+check('obrót 24h $1M → siła 60', stats({ volume24hUsd: 1_000_000 }).sila, 60)
+check('10 holderów → garda 0', stats({ holders: 10 }).garda, 0)
+check('1M holderów → garda 100', stats({ holders: 1_000_000 }).garda, 100)
+check('0 dni → szybkość 100', stats({ ageDays: 0 }).szybkosc, 100)
+check('730 dni → szybkość 0', stats({ ageDays: 730 }).szybkosc, 0)
+
+console.log('\n== Siła nie zależy od kapitalizacji ani od płynności ==')
+// Regresja: siła liczona jako kapitalizacja / płynność dawała maksimum tokenowi
+// bez płynności i tym samym wygrywała nim ze zdrowym. To miara ryzyka.
+const strengthOf = (over: Partial<typeof base>) => stats({ volume24hUsd: 1_000_000, ...over }).sila
+check('kapitalizacja x1000 nie rusza siły', strengthOf({ marketCapUsd: 1_000_000_000 }), strengthOf({ marketCapUsd: 1_000_000 }))
+check('zerowa płynność nie podbija siły', strengthOf({ liquidityUsd: 0, marketCapUsd: 1e9 }), 60)
+check('brak obrotu → siła 0', stats({ volume24hUsd: 0, marketCapUsd: 1e9, liquidityUsd: 0 }).sila, 0)
+
+console.log('\n== Podatność (kapitalizacja / płynność) ==')
+const vuln = (liquidityUsd: number, marketCapUsd: number) => computeVulnerability({ liquidityUsd, marketCapUsd })
+check('1x → 0', vuln(1_000_000, 1_000_000), 0)
+check('1000x → 100', vuln(1_000_000, 1_000_000_000), 100)
+check('mcap poniżej płynności nie schodzi pod 0', vuln(1_000_000, 1_000), 0)
+check('powyżej 1000x nie przekracza 100', vuln(1_000, 1e12), 100)
+check('zerowa płynność przy dodatniej mcap → sufit', vuln(0, 1e6), 100)
+check('brak obu liczb → 0, nie NaN', vuln(0, 0), 0)
+check('rośnie z kapitalizacją', vuln(1e6, 1e8) > vuln(1e6, 1e7), true)
+check('maleje z płynnością', vuln(1e7, 1e8) < vuln(1e6, 1e8), true)
 
 console.log('\n== Obcięcie do 0–100 ==')
-const below = computeStats({ liquidityUsd: 1, marketCapUsd: 1, holders: 1, ageDays: 5_000 })
+const below = computeStats({ liquidityUsd: 1, marketCapUsd: 1, volume24hUsd: 1, holders: 1, ageDays: 5_000 })
 check('poniżej skali nie schodzi pod 0', below, { wytrzymalosc: 0, sila: 0, garda: 0, szybkosc: 0 })
-const above = computeStats({ liquidityUsd: 1e12, marketCapUsd: 1e18, holders: 1e9, ageDays: 0 })
+const above = computeStats({ liquidityUsd: 1e12, marketCapUsd: 1e18, volume24hUsd: 1e12, holders: 1e9, ageDays: 0 })
 check('powyżej skali nie przekracza 100', above, { wytrzymalosc: 100, sila: 100, garda: 100, szybkosc: 100 })
 // Zerowa płynność daje log10(0) = -Infinity, a 0/0 daje NaN. Jedno i drugie
 // musi siadać na 0, nie przeciekać jako NaN. Szybkość 100 jest tu poprawna:
 // wiek 0 dni to udokumentowana kotwica skali, nie artefakt.
-const degenerate = computeStats({ liquidityUsd: 0, marketCapUsd: 0, holders: 0, ageDays: 0 })
+const degenerate = computeStats({ liquidityUsd: 0, marketCapUsd: 0, volume24hUsd: 0, holders: 0, ageDays: 0 })
 check('zera nie produkują NaN', degenerate, { wytrzymalosc: 0, sila: 0, garda: 0, szybkosc: 100 })
-check('mcap bez płynności → siła na sufit', computeStats({ liquidityUsd: 0, marketCapUsd: 1e6, holders: 10, ageDays: 0 }).sila, 100)
 check('nic nie jest NaN', Object.values(degenerate).some(Number.isNaN), false)
 
 console.log('\n== Statystyki nie zależą od przeciwnika ==')
 // Ten sam token policzony dwa razy musi dać to samo — normalizacja jest
 // na sztywnych progach, nigdy względem rywala.
-const solo = computeStats({ liquidityUsd: 2_130_000, marketCapUsd: 273_400_000, holders: 46_755, ageDays: 56 })
+const solo = computeStats(aiRaw)
 check('powtórzone wywołanie identyczne', solo, ai)
 
 console.log('\n== Kategorie wagowe ==')

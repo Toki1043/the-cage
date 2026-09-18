@@ -34,6 +34,9 @@ export interface CommentaryFighterInput {
   stats: { wytrzymalosc: number; sila: number; garda: number; szybkosc: number }
   liquidityUsd: number
   marketCapUsd: number
+  volume24hUsd: number
+  /** Szklana szczęka 0–100: kapitalizacja względem płynności. */
+  vulnerability: number
   holders: number
   ageDays: number
 }
@@ -121,6 +124,8 @@ interface CleanFighter {
   stats: { wytrzymalosc: number; sila: number; garda: number; szybkosc: number }
   liquidityUsd: number
   marketCapUsd: number
+  volume24hUsd: number
+  vulnerability: number
   holders: number
   ageDays: number
 }
@@ -139,6 +144,8 @@ function cleanFighter(raw: unknown): CleanFighter {
     },
     liquidityUsd: Math.max(0, finiteNumber(f.liquidityUsd)),
     marketCapUsd: Math.max(0, finiteNumber(f.marketCapUsd)),
+    volume24hUsd: Math.max(0, finiteNumber(f.volume24hUsd)),
+    vulnerability: stat(f.vulnerability),
     holders: Math.max(0, Math.round(finiteNumber(f.holders))),
     ageDays: Math.max(0, finiteNumber(f.ageDays)),
   }
@@ -193,8 +200,10 @@ function fightSheet(a: CleanFighter, b: CleanFighter, rounds: CleanRound[]): str
   const corner = (f: CleanFighter, side: string) =>
     `${side}: $${f.symbol} (${f.weight}) — market cap ${usd(f.marketCapUsd)}, liquidity ${usd(
       f.liquidityUsd,
-    )}, ${f.holders.toLocaleString('en-US')} holders, ${Math.round(f.ageDays)} days old. ` +
-    `Stamina ${f.stats.wytrzymalosc}, power ${f.stats.sila}, guard ${f.stats.garda}, speed ${f.stats.szybkosc}.`
+    )}, 24h volume ${usd(f.volume24hUsd)}, ${f.holders.toLocaleString('en-US')} holders, ` +
+    `${Math.round(f.ageDays)} days old. ` +
+    `Stamina ${f.stats.wytrzymalosc}, power ${f.stats.sila}, guard ${f.stats.garda}, speed ${f.stats.szybkosc}. ` +
+    `Glass jaw ${f.vulnerability} out of 100.`
 
   const lines = [corner(a, 'Red corner'), corner(b, 'Blue corner'), '', 'What happened:']
 
@@ -217,8 +226,8 @@ const SYSTEM = [
   'Ringside voice: fast, factual, calls the action. Colour voice: an ex-fighter who takes every punch personally and keeps drifting into stories about his own losses.',
   '',
   'The fight has already been decided by a simulation you cannot see. You are NOT told who won, and you must not guess, hint at, or announce a result — the referee does that. Call only what is on the sheet.',
-  "Each fighter's stats come from real chain data: stamina is liquidity, power is how thin that liquidity is relative to market cap, guard is holder distribution, speed is how young the pair is.",
-  'Work the real numbers in — a token with 40 holders should get mocked for having nobody in the arena.',
+  "Each fighter's stats come from real chain data: stamina is liquidity, power is 24h trading volume, guard is holder distribution, speed is how young the pair is. Glass jaw is market cap relative to liquidity: the higher it is, the less the fighter can take and the harder every punch lands on him.",
+  'Work the real numbers in — a token that only just cleared the 200-holder minimum to enter the ring should get mocked for the size of its crowd.',
   '',
   'Hard rules:',
   '- Use only the numbers on the sheet. Invent no facts about either token: no team, no narrative, no listings, no history.',
@@ -234,7 +243,7 @@ function userPrompt(sheet: string, roundCount: number): string {
     'Reply with only JSON: {"rounds":[{"call":string,"colour":string}]}',
     `One entry per round, in order, ${roundCount} total.`,
     "'call' at most 140 characters, 'colour' at most 110.",
-    'Example: {"rounds":[{"call":"SLOP comes out swinging and there is nothing behind it.","colour":"Forty holders. I had more people at my divorce."}]}',
+    'Example: {"rounds":[{"call":"SLOP comes out swinging and there is nothing behind it.","colour":"Two hundred and ten holders. I had more people at my divorce."}]}',
   ].join('\n')
 }
 

@@ -6,9 +6,11 @@ import {
   type ConcentrationVerdict,
   type HolderBalance,
 } from './concentration.ts'
+import { holderGate, type HolderGate } from './holder-gate.ts'
 import {
   computeChartModifiers,
   computeStats,
+  computeVulnerability,
   latestClose,
   sortPairsByLiquidity,
   weightClass,
@@ -32,6 +34,8 @@ export type QuoteToken = 'token0' | 'token1'
 export interface PairCandidate {
   address: string
   liquidityUsd: number
+  /** Obrót z ostatnich 24h na tej parze, w dolarach. */
+  volume24hUsd: number
   createdAt: number
   /**
    * Strona pary, na której stoi nasz token — musi trafić do `getBars`.
@@ -72,6 +76,8 @@ export interface TokenSnapshot {
   tokenFirstPairAt: number
 
   liquidityUsd: number
+  /** Obrót 24h na parze referencyjnej — z niego liczy się siła. */
+  volume24hUsd: number
   marketCapUsd: number
   holders: number
   priceUsd: number
@@ -112,6 +118,15 @@ export interface TokenFightData {
   networkId: number
   snapshot: TokenSnapshot
   stats: FightStats
+  /**
+   * Podatność 0–100 z kapitalizacji do płynności (szklana szczęka). Nie jest
+   * statystyką bojową: w symulacji zmniejsza pulę życia i zwiększa obrażenia
+   * przyjmowane. Liczona tu raz i niesiona obok statystyk, żeby symulacja nie
+   * liczyła jej drugi raz z surowych liczb.
+   */
+  vulnerability: number
+  /** Bramka na liczbie holderów — działa na darmowym planie, w przeciwieństwie do koncentracji. */
+  holderGate: HolderGate
   weightClass: WeightClass
   modifiers: ChartModifiers
   /**
@@ -130,6 +145,7 @@ const PAIRS_QUERY = `
     listPairsWithMetadataForToken(tokenAddress: $tokenAddress, networkId: $networkId) {
       results {
         liquidity
+        volume
         quoteToken
         backingToken { symbol }
         exchange { name }
@@ -271,6 +287,7 @@ async function fetchPairs(address: string, networkId: number): Promise<PairCandi
     listPairsWithMetadataForToken: {
       results: {
         liquidity: string | null
+        volume: string | null
         quoteToken: QuoteToken | null
         backingToken: { symbol: string | null } | null
         exchange: { name: string | null } | null
@@ -296,6 +313,7 @@ async function fetchPairs(address: string, networkId: number): Promise<PairCandi
     return {
       address: r.pair.address,
       liquidityUsd: toNumber(r.liquidity),
+      volume24hUsd: toNumber(r.volume),
       createdAt: Number(r.pair.createdAt),
       quoteToken: side ?? r.quoteToken ?? 'token0',
       backingSymbol: r.backingToken?.symbol ?? null,
@@ -338,9 +356,18 @@ async function fetchTokenMeta(address: string, networkId: number) {
     )
   }
 
+  // Bramka na holderach jest twarda, więc brak liczby nie może wyjść jako zero:
+  // zero to walkower, a walkower za to, że Codex czegoś nie zwrócił, byłby
+  // wynikiem wziętym znikąd. Lepiej przewrócić zapytanie niż zmyślić werdykt.
+  if (typeof result.holders !== 'number' || !Number.isFinite(result.holders)) {
+    throw new Error(
+      `Codex returned no holder count for ${address}, so the pre-fight check cannot be run.`,
+    )
+  }
+
   return {
     info: result.token.info,
-    holders: toNumber(result.holders),
+    holders: result.holders,
     circulatingSupply: toNumber(result.token.info.circulatingSupply),
     totalSupply: toNumber(result.token.info.totalSupply),
     reportedMarketCapUsd: result.marketCap === null ? null : toNumber(result.marketCap),
@@ -519,6 +546,7 @@ export async function fetchTokenFightData(
     tokenFirstPairAt: Math.min(...ranked.map((p) => p.createdAt)),
 
     liquidityUsd: pair.liquidityUsd,
+    volume24hUsd: pair.volume24hUsd,
     marketCapUsd,
     holders: meta.holders,
     priceUsd,
@@ -545,9 +573,12 @@ export async function fetchTokenFightData(
     stats: computeStats({
       liquidityUsd: snapshot.liquidityUsd,
       marketCapUsd: snapshot.marketCapUsd,
+      volume24hUsd: snapshot.volume24hUsd,
       holders: snapshot.holders,
       ageDays: snapshot.pairAgeDays,
     }),
+    vulnerability: computeVulnerability(snapshot),
+    holderGate: holderGate(snapshot.holders),
     weightClass: weightClass(snapshot.marketCapUsd),
     modifiers: computeChartModifiers(daily, hourly),
     concentration: concentrationVerdict(snapshot.concentration),

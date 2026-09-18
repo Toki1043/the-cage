@@ -34,6 +34,7 @@ import {
   INSTRUCTIONS,
   fightCancelledCall,
   glassJawCall,
+  holdersFailedCall,
   judgesCall,
   knockdownCall,
   knockoutCall,
@@ -180,6 +181,8 @@ function commentaryPayload(data: FightApiResponse): CommentaryRequest {
     stats: token.stats,
     liquidityUsd: token.snapshot.liquidityUsd,
     marketCapUsd: token.snapshot.marketCapUsd,
+    volume24hUsd: token.snapshot.volume24hUsd,
+    vulnerability: token.vulnerability,
     holders: token.snapshot.holders,
     ageDays: token.snapshot.pairAgeDays,
   })
@@ -548,15 +551,20 @@ function createRing(data: FightApiResponse, clock: Clock) {
   async function play(commentary: CommentaryLine[] | null) {
     for (const event of data.fight.events) {
       switch (event.type) {
-        // Badania przed pierwszym dzwonkiem. Zawodnik z koncentracją podaży
-        // od 70% w górę nie wchodzi do ringu — bez tych trzech gałęzi
-        // walkower byłby pustą animacją i werdyktem bez wyjaśnienia.
+        // Badania przed pierwszym dzwonkiem. Zawodnik z zbyt małą liczbą
+        // holderów albo z koncentracją podaży od 70% w górę nie wchodzi do
+        // ringu — bez tych trzech gałęzi walkower byłby pustą animacją
+        // i werdyktem bez wyjaśnienia.
         case 'medicalsFailed': {
           setRoundTag('Pre-fight check')
           panel.call = ''
           panel.colour = ''
           need(`f-${event.fighter}`).classList.add('down')
-          setRef(medicalsFailedCall(symbols[event.fighter], event.concentrationPercent))
+          setRef(
+            event.reason === 'holders'
+              ? holdersFailedCall(symbols[event.fighter], event.holders, event.minHolders)
+              : medicalsFailedCall(symbols[event.fighter], event.concentrationPercent),
+          )
           refCue('talking', TIMING.instructions)
           await sleep(TIMING.instructions)
           break

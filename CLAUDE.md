@@ -60,15 +60,42 @@ kilkunastu tysięcy do setek milionów). Każdy wynik obetnij do przedziału 0�
 
 ```
 wytrzymałość = (log10(płynnośćUSD) - 3) / 5 * 100          // $1k → 0, $100M → 100
-siła         = log10(kapitalizacja / płynność) / 3 * 100    // 1x → 0, 1000x → 100
+siła         = (log10(obrót24hUSD) - 3) / 5 * 100          // $1k → 0, $100M → 100
 garda        = (log10(holderzy) - 1) / 5 * 100              // 10 → 0, 1M → 100
 szybkość     = 100 - (log10(dni + 1) / log10(731)) * 100    // dziś → 100, 2 lata → 0
 ```
 
-Kontrola poprawności — token AI (Artificial Inu), płynność $2,13M, kapitalizacja
-$273,4M, 46 755 holderów, 56 dni: wytrzymałość 67, siła 70, garda 73, szybkość 39.
+Siła bierze się z **obrotu 24h** pary referencyjnej, nie z kapitalizacji ani płynności.
+Kiedyś była to kapitalizacja / płynność — to miara ryzyka, nie siły: token bez płynności
+dostawał maksimum i wygrywał ze zdrowym. Ten stosunek żyje teraz jako podatność (niżej).
+
+Kontrola poprawności — token AI (Artificial Inu), płynność $2,13M, obrót 24h $1 mln
+(liczba wzorcowa, nie pomiar), kapitalizacja $273,4M, 46 755 holderów, 56 dni:
+wytrzymałość 67, siła 60, garda 73, szybkość 39, podatność 70.
 
 Jeśli przeliczenie daje inne liczby, wzór został źle zaimplementowany.
+
+### Podatność (szklana szczęka)
+
+Kapitalizacja / płynność nie jest statystyką bojową, tylko podatnością, w skali 0–100:
+
+```
+podatność = log10(kapitalizacja / płynność) / 3 * 100       // 1x → 0, 1000x → 100
+```
+
+Wysoka podatność zmniejsza pulę życia (do −15%) i zwiększa obrażenia otrzymywane
+(do +15%). Zerowa płynność przy dodatniej kapitalizacji daje sufit, czyli 100.
+W kodzie nazywa się `vulnerability`, bo `glassJaw` jest już zajęte przez pasmo
+koncentracji 50–70%.
+
+### Bramka na holderach
+
+Poniżej **200 holderów** zawodnik nie przechodzi badań lekarskich i przegrywa walkowerem —
+tak samo jak przy koncentracji powyżej 70%. Liczba holderów przychodzi z `filterTokens`
+za darmo, więc ta bramka działa bez planu Growth, w przeciwieństwie do koncentracji.
+Dokładnie 200 przechodzi. Gdy Codex nie zwróci liczby holderów, zapytanie kończy się
+błędem, a nie walkowerem: zero z braku danych byłoby wynikiem wziętym znikąd.
+Zawodnik z obiema wadami dostaje jeden powód — holderów.
 
 ## Kategorie wagowe
 

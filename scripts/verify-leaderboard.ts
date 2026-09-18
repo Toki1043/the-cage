@@ -10,7 +10,8 @@ import { simulateFight } from '../src/lib/fight.ts'
 import { readBoard, readLeaderboard, readRecord, recordFight } from '../src/lib/leaderboard.ts'
 import type { TokenFightData } from '../src/lib/codex.ts'
 import { concentrationUnavailable, concentrationVerdict } from '../src/lib/concentration.ts'
-import { computeStats, weightClass } from '../src/lib/stats.ts'
+import { holderGate } from '../src/lib/holder-gate.ts'
+import { computeStats, computeVulnerability, weightClass } from '../src/lib/stats.ts'
 
 let failed = 0
 
@@ -32,7 +33,7 @@ function check(label: string, actual: unknown, expected: unknown) {
 function token(
   address: string,
   symbol: string,
-  raw: { liquidityUsd: number; marketCapUsd: number; holders: number; ageDays: number },
+  raw: { liquidityUsd: number; marketCapUsd: number; volume24hUsd: number; holders: number; ageDays: number },
 ): TokenFightData {
   // Koncentracji nie ma — tak jak na darmowym planie Codexu. Pasmo `clear`,
   // zero wpływu na walkę; pasma sprawdza `verify:concentration`.
@@ -43,6 +44,8 @@ function token(
     symbol,
     networkId: 4663,
     stats: computeStats(raw),
+    vulnerability: computeVulnerability(raw),
+    holderGate: holderGate(raw.holders),
     weightClass: weightClass(raw.marketCapUsd),
     concentration: concentrationVerdict(concentration),
     snapshot: {
@@ -56,6 +59,7 @@ function token(
       runnerUpLiquidityUsd: null,
       tokenFirstPairAt: 0,
       liquidityUsd: raw.liquidityUsd,
+      volume24hUsd: raw.volume24hUsd,
       marketCapUsd: raw.marketCapUsd,
       holders: raw.holders,
       priceUsd: 1,
@@ -85,6 +89,7 @@ function token(
 const AI = token('0x2e8c31162b855a2ffa90f6f8634643ad6f111e18', 'AI', {
   liquidityUsd: 2_130_000,
   marketCapUsd: 273_400_000,
+  volume24hUsd: 800_000,
   holders: 46_755,
   ageDays: 56,
 })
@@ -92,6 +97,7 @@ const AI = token('0x2e8c31162b855a2ffa90f6f8634643ad6f111e18', 'AI', {
 const WETH = token('0x0bd7d308f8e1639fab988df18a8011f41eacad73', 'WETH', {
   liquidityUsd: 9_400_000,
   marketCapUsd: 61_000_000,
+  volume24hUsd: 2_000_000,
   holders: 310_000,
   ageDays: 120,
 })
@@ -99,7 +105,10 @@ const WETH = token('0x0bd7d308f8e1639fab988df18a8011f41eacad73', 'WETH', {
 const SLOP = token('0x00000000000000000000000000000000000slop1', 'SLOP', {
   liquidityUsd: 41_000,
   marketCapUsd: 1_800_000,
-  holders: 40,
+  volume24hUsd: 9_000,
+  // Powyżej progu bramki (200): ten fixture ma walczyć naprawdę, a nie oddawać
+  // walkower — bramkę sprawdza `verify:holders`.
+  holders: 400,
   ageDays: 3,
 })
 
@@ -115,6 +124,7 @@ check('pierwszy zapis przechodzi', first.recorded, true)
 check('bez bazy magazyn jest nietrwały', first.persistent, false)
 check('zapisana walka ma wynik z symulacji', first.fight.winner, fight.winner)
 check('zapisana walka trzyma snapshot wejść', first.fight.sides.a.inputs.liquidityUsd, 2_130_000)
+check('snapshot trzyma obrót 24h, z którego liczy się siła', first.fight.sides.a.inputs.volume24hUsd, 800_000)
 check('zapisana walka trzyma statystyki', first.fight.sides.a.stats, AI.stats)
 
 console.log('\n== Idempotencja ==')
@@ -142,6 +152,7 @@ console.log('\n== Zmiana kategorii wagowej ==')
 const WETH_LIGHTER = token(WETH.address, 'WETH', {
   liquidityUsd: 9_400_000,
   marketCapUsd: 8_000_000,
+  volume24hUsd: 2_000_000,
   holders: 310_000,
   ageDays: 121,
 })

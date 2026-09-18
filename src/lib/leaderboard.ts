@@ -26,8 +26,15 @@ import type { FightStats, WeightClassId } from './stats'
 import { WEIGHT_CLASSES } from './stats.ts'
 import { getJson, isPersistent, mgetJson, setIfAbsent, setJson, zadd, zcard, zrem, ztop } from './kv.ts'
 
-/** Wersja w kluczach: zmiana kształtu rekordu nie miesza się ze starymi. */
-const V = 'v1'
+/**
+ * Wersja w kluczach: zmiana kształtu rekordu nie miesza się ze starymi.
+ *
+ * v2: siła liczona z obrotu 24h zamiast z kapitalizacji / płynności, plus
+ * podatność i bramka na holderach. Walki z v1 były policzone inną regułą,
+ * a klucz walki jest idempotentny po parze adresów — bez nowej wersji ta sama
+ * para nie mogłaby zostać rozegrana ponownie, a ranking mieszałby dwie skale.
+ */
+const V = 'v2'
 
 /** Klucz walki. `seedKey` jest funkcją obu adresów, więc ta sama para = ten sam klucz. */
 const fightKey = (seedKey: string) => `fight:${V}:${seedKey}`
@@ -40,11 +47,13 @@ const member = (networkId: number, address: string) => `${networkId}:${address.t
  * Liczby ze snapshotu, na których policzono statystyki tej walki.
  *
  * Kopia, nie referencja do pełnego `TokenSnapshot`: rekord ma zostać czytelny
- * i mały, a to są jedyne cztery wielkości wchodzące do mapowania.
+ * i mały, a to są jedyne wielkości wchodzące do mapowania.
  */
 export interface RecordedInputs {
   liquidityUsd: number
   marketCapUsd: number
+  /** Obrót 24h na parze referencyjnej — z niego liczy się siła. */
+  volume24hUsd: number
   holders: number
   ageDays: number
   /** Kiedy zdjęto snapshot — dane z Codexu ruszają się w czasie. */
@@ -116,6 +125,7 @@ function inputsOf(token: TokenFightData): RecordedInputs {
   return {
     liquidityUsd: token.snapshot.liquidityUsd,
     marketCapUsd: token.snapshot.marketCapUsd,
+    volume24hUsd: token.snapshot.volume24hUsd,
     holders: token.snapshot.holders,
     ageDays: token.snapshot.pairAgeDays,
     fetchedAt: token.snapshot.fetchedAt,

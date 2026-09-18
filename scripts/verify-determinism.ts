@@ -20,7 +20,7 @@
  *   npm run dev
  *   npm run verify:determinism
  */
-import { computeStats, weightClass } from '../src/lib/stats.ts'
+import { computeStats, computeVulnerability, weightClass } from '../src/lib/stats.ts'
 
 const BASE = process.env.FIGHT_URL ?? 'http://localhost:3117'
 const A = process.env.FIGHT_A ?? '0x2e8c31162b855a2ffa90f6f8634643ad6f111e18' // AI
@@ -30,6 +30,7 @@ const GAP_MS = Number(process.env.FIGHT_GAP_MS ?? 25_000)
 interface TokenPayload {
   symbol: string
   stats: Record<string, number>
+  vulnerability: number
   weightClass: { id: string }
   snapshot: {
     pairAddress: string
@@ -38,6 +39,7 @@ interface TokenPayload {
     pairsConsidered: number
     liquidityUsd: number
     marketCapUsd: number
+    volume24hUsd: number
     holders: number
     priceUsd: number
     pairAgeDays: number
@@ -181,14 +183,18 @@ for (const token of TOKENS) {
 console.log('\n== 3. Statystyki odtwarzalne z własnego snapshotu ==')
 runs.forEach((run, i) => {
   for (const token of TOKENS) {
-    const { symbol, stats, weightClass: wc, snapshot } = run[token]
+    const { symbol, stats, vulnerability, weightClass: wc, snapshot } = run[token]
     const recomputed = computeStats({
       liquidityUsd: snapshot.liquidityUsd,
       marketCapUsd: snapshot.marketCapUsd,
+      volume24hUsd: snapshot.volume24hUsd,
       holders: snapshot.holders,
       ageDays: snapshot.pairAgeDays,
     })
-    const statsOk = JSON.stringify(recomputed) === JSON.stringify(stats)
+    // Podatność też musi dać się odtworzyć ze snapshotu: idzie do symulacji
+    // obok statystyk i bez tego walki nie da się zweryfikować.
+    const vulnerabilityOk = computeVulnerability(snapshot) === vulnerability
+    const statsOk = JSON.stringify(recomputed) === JSON.stringify(stats) && vulnerabilityOk
     const wcOk = weightClass(snapshot.marketCapUsd).id === wc.id
     check(
       `przebieg ${i + 1} ${symbol}`,
@@ -209,7 +215,7 @@ if (outcomes.every((o) => o === outcomes[0])) {
 }
 for (const token of TOKENS) {
   const symbol = first[token].symbol
-  for (const field of ['liquidityUsd', 'priceUsd', 'marketCapUsd'] as const) {
+  for (const field of ['liquidityUsd', 'volume24hUsd', 'priceUsd', 'marketCapUsd'] as const) {
     const nums = runs.map((r) => r[token].snapshot[field])
     const spread = ((Math.max(...nums) - Math.min(...nums)) / nums[0]) * 100
     console.log(`     ${symbol}.${field}: ${spread.toFixed(4)}% rozrzutu`)

@@ -20,7 +20,8 @@ import {
 import { combatProfile, simulateFight, type FighterInput } from '../src/lib/fight.ts'
 import { recordFight } from '../src/lib/leaderboard.ts'
 import type { TokenFightData } from '../src/lib/codex.ts'
-import { computeStats, weightClass, type ChartModifiers } from '../src/lib/stats.ts'
+import { holderGate } from '../src/lib/holder-gate.ts'
+import { computeStats, computeVulnerability, weightClass, type ChartModifiers } from '../src/lib/stats.ts'
 
 let failed = 0
 
@@ -224,6 +225,10 @@ function fighter(address: string, symbol: string, percent: number | null): Fight
     symbol,
     stats: { wytrzymalosc: 70, sila: 60, garda: 60, szybkosc: 50 },
     modifiers: mods,
+    // Zero podatności i tyle holderów, żeby bramka przepuszczała: ten skrypt
+    // sprawdza koncentrację, a nie te dwie mechaniki.
+    vulnerability: 0,
+    holderGate: holderGate(10_000),
     concentration: concentrationVerdict(at(percent)),
   }
 }
@@ -235,11 +240,12 @@ const rejected = fighter('0x4444444444444444444444444444444444444444', 'FAIL', 8
 const alsoRejected = fighter('0x5555555555555555555555555555555555555555', 'FAIL2', 99)
 
 console.log('   -- poniżej 30%: bez kary')
-check('pula życia jak bez koncentracji', combatProfile(clean).hpStart, 220)
+// Wytrzymałość 70 + `hpBase` 180 = 250; podatność 0, więc nic więcej nie odejmuje.
+check('pula życia jak bez koncentracji', combatProfile(clean).hpStart, 250)
 
 console.log('   -- 30–50%: kara do wytrzymałości')
 check('kara obniża pulę życia', combatProfile(penalised).hpStart < combatProfile(clean).hpStart, true)
-check('kara to połowa maksimum, czyli 10%', combatProfile(penalised).hpStart, 198)
+check('kara to połowa maksimum, czyli 10%', combatProfile(penalised).hpStart, 225)
 check('próg poobijania spada razem z pulą', combatProfile(penalised).hurtThreshold < combatProfile(clean).hurtThreshold, true)
 
 console.log('   -- 50–70%: szklana szczęka')
@@ -294,11 +300,11 @@ const rawHigh = fighter('0x6666666666666666666666666666666666666666', 'RAW', nul
 const rawFight = simulateFight(rawHigh, clean)
 check('surowa liczba nie odwołuje walki', ['KO', 'TKO', 'decision', 'draw'].includes(rawFight.method), true)
 check('i nie daje walkoweru', rawFight.method === 'walkover', false)
-check('pula życia nietknięta', combatProfile(rawHigh).hpStart, 220)
+check('pula życia nietknięta', combatProfile(rawHigh).hpStart, 250)
 
 console.log('\n== Odwołana walka nie wchodzi do rankingu ==')
 function tokenData(f: FighterInput, percent: number | null): TokenFightData {
-  const raw = { liquidityUsd: 2_130_000, marketCapUsd: 273_400_000, holders: 46_755, ageDays: 56 }
+  const raw = { liquidityUsd: 2_130_000, marketCapUsd: 273_400_000, volume24hUsd: 800_000, holders: 46_755, ageDays: 56 }
   const concentration = at(percent)
   return {
     address: f.address,
@@ -306,6 +312,8 @@ function tokenData(f: FighterInput, percent: number | null): TokenFightData {
     symbol: f.symbol,
     networkId: 4663,
     stats: computeStats(raw),
+    vulnerability: computeVulnerability(raw),
+    holderGate: holderGate(raw.holders),
     weightClass: weightClass(raw.marketCapUsd),
     concentration: concentrationVerdict(concentration),
     modifiers: mods,
@@ -318,6 +326,7 @@ function tokenData(f: FighterInput, percent: number | null): TokenFightData {
       runnerUpLiquidityUsd: null,
       tokenFirstPairAt: 0,
       liquidityUsd: raw.liquidityUsd,
+      volume24hUsd: raw.volume24hUsd,
       marketCapUsd: raw.marketCapUsd,
       holders: raw.holders,
       priceUsd: 1,
