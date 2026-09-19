@@ -30,6 +30,7 @@ import type { FightStats, WeightClassId } from '@/lib/stats'
 import type { CommentaryEvent, CommentaryLine, CommentaryRequest } from '@/lib/commentary'
 import { drawFighter } from '@/lib/fighter-svg'
 import { drawReferee } from '@/lib/referee-svg'
+import { HallBanners } from './hall-banners'
 import {
   INSTRUCTIONS,
   fightCancelledCall,
@@ -1199,6 +1200,7 @@ export default function Home() {
   return (
     <div className="cage">
       <div className="cage-bg" aria-hidden />
+      <HallBanners />
 
       {/* Pasek terminala na górze ekranu — jedyne miejsce do wpisania czegoś.
           Bez osobnego ekranu startowego: to samo wejście leży na tle areny.

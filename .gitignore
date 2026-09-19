@@ -47,6 +47,9 @@ public/arena/*.png
 # w czasie dzialania, wiec bez nich deploy z gita ma ring bez sedziego.
 !public/arena/sahur.png
 !public/arena/club.png
+# Logo na chorągwiach (hall-banners.tsx): wycięcie z public/orbio logo.jpg.
+# Też ładowane w czasie działania, więc musi być w gicie.
+!public/arena/orbio-logo.png
 # Grafiki zawodnikow tez: fighter-svg.ts wciaga je w czasie dzialania, wiec bez
 # nich deploy z gita ma ring bez byka i bez niebieskiego. Wyjatkiem nie sa
 # niedzwiedz (bear-*.png, nieuzywany od zmiany niebieskiego narozniku) ani

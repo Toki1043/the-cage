@@ -211,14 +211,20 @@
   .ring .ropes span:nth-child(3){top:90%}
   .stage{display:grid;grid-template-columns:1fr 1fr;align-items:end;position:relative;z-index:1}
   .stage .floor{position:absolute;left:0;right:0;bottom:1.4rem;height:3px;background:var(--rule)}
-  .fighter{position:relative;z-index:1;transition:transform .2s ease-out;padding-bottom:1.4rem}
-  /* Zawodnicy są większi o 28% niż wynikałoby z viewBoxa (byli mniejsi od
-     sędziego i za mali względem ringu). Skala idzie przez `transform`, nie przez
+  .fighter{position:relative;top:calc(var(--floor-lift) * -1);z-index:1;
+    transition:transform .2s ease-out;padding-bottom:1.4rem}
+  /* Zawodnicy stali na samej przedniej krawędzi maty, czyli wizualnie poniżej
+     kortu. `--floor-lift` podnosi ich (i sędziego, żeby wszyscy stali w jednej
+     płaszczyźnie) o stałą wartość: `top` na zawodniku i `bottom` sędziego, bez
+     zmiany układu areny, więc ani `transform` animacji, ani wysokość ringu się
+     nie ruszają. Wraz z nimi jedzie cień (`::after` jest ich dzieckiem). */
+  /* Zawodnicy są większi o 60% niż wynikałoby z viewBoxa (kiedyś o 28%, byli
+     mniejsi od sędziego i za mali względem ringu, potem o 25% więcej). Skala idzie przez `transform`, nie przez
      większy `svg`: transform nie zmienia układu, więc arena, ring i sędzia stoją
      w miejscu, a punkt zaczepienia leży dokładnie na podłodze (y=168 z 176 =
      95,4545% wysokości) — stopy zostają na tej samej linii. Przycinanie do
      viewBoxa skaluje się razem z elementem, więc nic nie zostaje ucięte. */
-  :root{--fighter-scale:1.28}
+  :root{--fighter-scale:1.6;--fighter-spread:.6rem;--floor-lift:2.5rem}
   .fighter svg{display:block;width:100%;max-width:13rem;height:auto;margin:0 auto;
     transform:scale(var(--fighter-scale));transform-origin:50% 95.4545%}
   /* Skala rośnie wokół środka svg, więc zawodnik rośnie też w stronę sędziego i
@@ -227,9 +233,10 @@
      przyrost wewnętrznej krawędzi przywraca odstęp w spoczynku. Krawędź jest
      w jednostkach viewBoxa od środka (x=60): poza gardy byka 29,3, stwór 42,1;
      1 jednostka = 13rem/120. Liczone z tej samej zmiennej, więc zmiana skali
-     nie wymaga liczenia tego od nowa. */
-  .fighter.a svg{transform:translateX(calc((var(--fighter-scale) - 1) * -3.17rem)) scale(var(--fighter-scale))}
-  .fighter.b svg{transform:translateX(calc((var(--fighter-scale) - 1) * 4.56rem)) scale(var(--fighter-scale))}
+     nie wymaga liczenia tego od nowa. `--fighter-spread` to dodatkowy,
+     niewielki rozstaw na zewnątrz ponad ten wyliczony. */
+  .fighter.a svg{transform:translateX(calc((var(--fighter-scale) - 1) * -3.17rem - var(--fighter-spread))) scale(var(--fighter-scale))}
+  .fighter.b svg{transform:translateX(calc((var(--fighter-scale) - 1) * 4.56rem + var(--fighter-spread))) scale(var(--fighter-scale))}
   /* Niebieski NIE jest odbijany. Niedźwiedź patrzył w prawo i `scaleX(-1)`
      obracał go w stronę czerwonego; nowa postać patrzy w lewo sama. Odbicie
      odwracało przy okazji każdy ruch w środku svg (wykrok, odskok, upadek),
@@ -524,7 +531,7 @@
      kształtami, bo musi dzwonić w rytm wymachu. Pałka jest osobną warstwą
      właśnie po to, żeby dało się nią machać: figura odgrywa to, co policzyła
      symulacja, i nie decyduje o niczym (CLAUDE.md § Sędzia). */
-  .referee{position:absolute;left:50%;bottom:1.4rem;width:46%;max-width:13rem;
+  .referee{position:absolute;left:50%;bottom:calc(1.4rem + var(--floor-lift));width:46%;max-width:13rem;
     transform:translateX(-50%);z-index:0;opacity:.94;pointer-events:none}
   .referee svg{display:block;width:100%;height:auto}
 
@@ -609,15 +616,16 @@
   .fighter::after,.referee::after{content:'';position:absolute;left:50%;bottom:1.15rem;
     transform:translateX(-50%);border-radius:50%;background:rgba(0,0,0,.3);filter:blur(3px);z-index:-1}
   /* Cień idzie za zawodnikiem o to samo przesunięcie, o które odsunięto svg. */
-  .fighter.a::after{transform:translateX(calc(-50% + (var(--fighter-scale) - 1) * -3.17rem))}
-  .fighter.b::after{transform:translateX(calc(-50% + (var(--fighter-scale) - 1) * 4.56rem))}
+  .fighter.a::after{transform:translateX(calc(-50% + (var(--fighter-scale) - 1) * -3.17rem - var(--fighter-spread)))}
+  .fighter.b::after{transform:translateX(calc(-50% + (var(--fighter-scale) - 1) * 4.56rem + var(--fighter-spread)))}
   /* Cień jest na `.fighter`, nie w svg, więc skala zawodnika go nie obejmuje —
      mnożymy go tą samą zmienną, żeby rósł razem z postacią. */
   .fighter::after{width:calc(54% * var(--fighter-scale));max-width:calc(7rem * var(--fighter-scale));
     height:calc(.75rem * var(--fighter-scale))}
   /* Rowerowy stwór jest długi (koła rozstawione na ~70% szerokości), więc jego
-     cień jest szerszy niż cień byka. */
-  .fighter.b::after{width:calc(72% * var(--fighter-scale));max-width:calc(10rem * var(--fighter-scale))}
+     cień jest szerszy niż cień byka. Górny limit trzyma go w `.arena`
+     (`overflow:hidden`): przy szerszym cień wychodził za krawędź i był ucinany. */
+  .fighter.b::after{width:calc(72% * var(--fighter-scale));max-width:calc(8.5rem * var(--fighter-scale))}
   .referee::after{width:40%;height:.55rem;bottom:1.2rem;margin-left:-13%}
 
   /* Ring nie stoi bezczynnie przed pierwszym gongiem. Oddech idzie po
@@ -631,4 +639,61 @@
   @media (prefers-reduced-motion:reduce){
     .arena{transition:none}
     .fighter,.referee .ref-fig{animation:none}
+  }
+
+  /* ---------- chorągwie pod sufitem (hall-banners.tsx) ---------- */
+  /* Scenografia za całą treścią: warstwa 1, nad tłem (0) i pod sceną (5),
+     kartami (15) i paskiem (30). Nie łapią kliknięć. Wiszą z górnej krawędzi
+     ekranu na dwóch linkach, więc zaczynają się poza kadrem.
+
+     Miejsce: wolny pas między kolumną kart a paskiem adresów. Karty wypełniają
+     kolumny boczne przez całą walkę, więc chorągiew tam wisząca znikałaby za
+     nimi i przebijała przez ich półprzezroczyste tło. Szerokość pasa to
+     (środek − 46rem) / 2, gdzie 46rem to szerokość `.topbar`, a środek to
+     ekran bez dwóch kolumn bocznych i odstępów siatki `.cage`. Rozmiar
+     komórki (`--cell`, jeden piksel sztuki) wynika z tej szerokości i jest
+     liczbą całkowitą pikseli, żeby krawędzie zostały ostre. Gdy pas jest
+     węższy niż 5rem (ekran poniżej 92rem), komórka miałaby mniej niż 3px i
+     chorągiew wyglądałaby jak wąski pasek wciśnięty w kartę adresu, więc jej
+     nie ma: nie ma gdzie jej powiesić bez nakładania się na panele. */
+  .hall-banners{display:none}
+  @media (min-width:92rem){
+    .hall-banners{--banner-w:19;
+      --mid:calc(100vw - 2 * var(--side-w) - 4rem);
+      --free:max(0px, calc((var(--mid) - 46rem) / 2));
+      --cell:clamp(3px, round(down, calc((var(--free) - 1rem) / (var(--banner-w) + 2)), 1px), 5px);
+      --banner-px:calc(var(--cell) * (var(--banner-w) + 2));
+      display:block;position:absolute;inset:0;z-index:1;pointer-events:none;overflow:hidden}
+    .banner{position:absolute;top:0}
+    /* Środek pasa: lewy brzeg środka + pół szerokości pasa − pół chorągwi. */
+    .banner.left{left:calc(2rem + var(--side-w) + var(--free) / 2 - var(--banner-px) / 2)}
+    .banner.right{right:calc(2rem + var(--side-w) + var(--free) / 2 - var(--banner-px) / 2)}
+  }
+  /* Lekko przygaszone: chorągwie wiszą w cieniu pod kratownicą, nie w świetle
+     reflektorów nad ringiem. */
+  .banner-sway{position:relative;padding-top:calc(var(--cell) * 8);transform-origin:50% 0;
+    filter:brightness(.82);animation:banner-sway 7.4s ease-in-out infinite alternate;
+    animation-delay:-2s}
+  .banner.right .banner-sway{animation-duration:8.6s;animation-delay:-5.5s}
+  .banner-svg{display:block;width:var(--banner-px);
+    height:calc(var(--cell) * 51);overflow:visible}
+  .banner-cable{position:absolute;top:-1rem;height:calc(var(--cell) * 8 + 1rem);
+    width:max(2px,calc(var(--cell) / 2));background:#6b5a45}
+  .bn-cloth{fill:#0b0f1a}
+  .bn-lit{fill:#151d33}
+  .bn-fold{fill:#000;fill-opacity:.3}
+  .bn-trim{fill:#7d6113}
+  /* Dwa stopnie tarczy pod logo: tkanina rozjaśnia się ku środkowi, jakby padało
+     na nią światło z góry, a logo nie leży na płaskim tle jak naklejka. */
+  .bn-glow-outer{fill:#111a2c}
+  .bn-glow-inner{fill:#182238}
+  .bn-gold{fill:var(--gold)}
+  .bn-rod{fill:var(--wood-lit)}
+  .bn-rod-under{fill:var(--wood-dim)}
+  .banner.left .bn-band{fill:var(--red)}
+  .banner.right .bn-band{fill:var(--blue)}
+  @keyframes banner-sway{from{transform:rotate(-1.3deg)}to{transform:rotate(1.3deg)}}
+
+  @media (prefers-reduced-motion:reduce){
+    .banner-sway{animation:none}
   }
