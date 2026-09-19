@@ -275,6 +275,29 @@ Z płynności, kapitalizacji, holderów i wieku nie wynika szansa na 2x. Panel m
 ile kosztuje ruch ceny, nie czy ten ruch nastąpi. Nigdy nie formułuj tego jako
 "większa szansa na wzrost", "lepsza okazja" ani żadnej innej prognozy.
 
+### Zdanie porównawcze pod panelem
+
+Główne zdanie pod „Ringside read" (`comparisonHeadline` w `src/lib/ringside.ts`) nie mówi
+już zawsze o płynności. Wybiera **najostrzejszą różnicę z trzech**:
+
+1. koncentracja podaży — punkty procentowe między tokenami, próg 10 pp; tylko z odsianych
+   sald (`concentration.status === 'ok'`), nigdy z surowego `top10HoldersPercent`;
+2. rotacja przy płynności (obrót 24h ÷ płynność) — jedna co najmniej 2× większa od drugiej,
+   obie liczone od dołu do 1% dziennie;
+3. liczba GOAT WALLETS — różnica co najmniej 10% listy i co najmniej 3 portfele.
+
+Każda różnica jest dzielona przez swój próg, żeby trzy miary dały wynik w jednej skali
+(1 = na progu); wygrywa najwyższy wynik ≥ 1, remis rozstrzyga kolejność powyżej. Gdy żadna nie
+różnicuje wyraźnie, zdanie wraca do wyjścia z pozycji (ile da się sprzedać przed spadkiem
+o 10%). Wszystko to arytmetyka i progi, bez modelu.
+
+- Zdania podają liczby, nie oceny: „26 of 67 GOAT WALLETS hold $AI, 18 hold $WETH." Bez
+  „więcej znaczy lepiej", bez porad, bez prognoz. Lista portfeli dalej nie jest sygnałem.
+- Brak koncentracji po którejkolwiek stronie po cichu wyłącza jej wariant. **Dziś tak jest
+  zawsze:** salda holderów wymagają planu Growth (Codex odpowiada `Not authorized: please
+  upgrade your plan`, sprawdzone na żywo). Po zmianie planu wariant włączy się sam.
+- `npm run verify:headline` pilnuje progów, remisów, cichego pomijania wariantów i słów oceny.
+
 ## Konfiguracja API
 
 Klucz Orbio idzie przez pośrednika Orbio, nie wprost na OpenRouter:

@@ -21,7 +21,7 @@
  * gdyby się przerysował, wyczyściłby ring w połowie rundy.
  */
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { TokenFightData } from '@/lib/codex'
 import type { FightResult, Side } from '@/lib/fight'
 import type { FightApiResponse } from '@/lib/fight-response'
@@ -33,6 +33,7 @@ import { drawReferee } from '@/lib/referee-svg'
 import { HallBanners } from './hall-banners'
 import { modelsLabel } from '@/lib/orbio-stack'
 import { VOICE_NAMES, type CommentaryVoice } from '@/lib/commentary-voices'
+import { getSFXPlayer, type SFXType } from '@/lib/sfx'
 import {
   INSTRUCTIONS,
   fightCancelledCall,
@@ -48,7 +49,7 @@ import {
   verdictLine,
   walkoverCall,
 } from '@/lib/referee'
-import { count, ringsideRead, usd } from '@/lib/ringside'
+import { comparisonHeadline, count, headlineToken, ringsideRead, usd } from '@/lib/ringside'
 import type { SecurityChecks, SecurityFlag } from '@/lib/security'
 import { explainFight, type WhyCell } from '@/lib/why'
 
@@ -366,7 +367,7 @@ function drawTape(a: TokenFightData, b: TokenFightData) {
  * niebieska po prawej) plus jedna wspólna linijka porównania w panelu
  * sędziego na dole — zamiast jednego bloku pod areną.
  */
-function drawRead(a: TokenFightData, b: TokenFightData) {
+function drawRead(a: TokenFightData, b: TokenFightData, tracked: FightApiResponse['tracked'] | undefined) {
   const reads = [a, b].map((token) =>
     ringsideRead({
       liquidityUsd: token.snapshot.liquidityUsd,
@@ -391,22 +392,21 @@ function drawRead(a: TokenFightData, b: TokenFightData) {
   fill('a', a, ra)
   fill('b', b, rb)
 
-  const thinner = ra.exitUsd < rb.exitUsd ? a : b
-  const wider = thinner === a ? b : a
-  const wide = Math.max(ra.exitUsd, rb.exitUsd)
-  const thin = Math.min(ra.exitUsd, rb.exitUsd)
-  const ratio = wide / Math.max(1, thin)
+  // Główne zdanie wybiera najostrzejszą różnicę z trzech (koncentracja podaży,
+  // rotacja przy płynności, GOAT WALLETS) albo wraca do wyjścia z pozycji.
+  // Liczy je `comparisonHeadline`: arytmetyka i progi, bez modelu. Koncentracja
+  // wchodzi tylko z odsianych sald (status `ok`); bez nich wariantu po cichu nie ma.
+  const asHeadlineToken = (token: TokenFightData, held: number | null | undefined) =>
+    headlineToken(tick(token.symbol), token.snapshot, held ?? null)
+  const picked = comparisonHeadline(
+    asHeadlineToken(a, tracked?.configured ? tracked.a : null),
+    asHeadlineToken(b, tracked?.configured ? tracked.b : null),
+    tracked?.configured ? tracked.watched : null,
+  )
 
   const headline = need('read-headline')
-  // Sub-1.2x is noise, not a real gap — a "1x difference" reads as a claim
-  // that one side is worse, when the exit costs the same either way.
-  headline.textContent =
-    ratio < 1.2
-      ? `Exiting either token costs about the same before the price drops 10%: roughly ${usd(wide)} ` +
-        `out of $${tick(wider.symbol)} and ${usd(thin)} out of $${tick(thinner.symbol)}.`
-      : `You can move about ${usd(wide)} out of $${tick(wider.symbol)} before the price drops 10%, ` +
-        `and only about ${usd(thin)} out of $${tick(thinner.symbol)} — ` +
-        `roughly a ${count(ratio)}× difference in how easily you get your money back.`
+  headline.textContent = picked.text
+  headline.dataset.kind = picked.kind
   headline.hidden = false
 }
 
@@ -620,11 +620,14 @@ function createRing(data: FightApiResponse, clock: Clock) {
   /** Odliczanie: 1 … 2 … 3, dopisywane do kwestii sędziego. */
   async function countTo(to: number, lead: string, step: number) {
     const ref = need('ref-fig')
+    const sfx = getSFXPlayer()
     ref.classList.add('counting')
     const spoken: number[] = []
     for (let n = 1; n <= to; n++) {
       spoken.push(n)
       setRef(`${lead} ${spoken.join(' … ')}`)
+      // Odtwórz dźwięk odliczania
+      void sfx.play(`count-${n}` as SFXType)
       await sleep(step)
     }
     ref.classList.remove('counting')
@@ -654,6 +657,8 @@ function createRing(data: FightApiResponse, clock: Clock) {
     await sleep(TIMING.landedWindup)
     defender.classList.add('hit')
     flash()
+    // Dźwięk ciosu
+    void getSFXPlayer().play('punch')
     pop(defenderSide, `-${Math.max(1, Math.round(event.damage))}`)
     setHp(defenderSide, (event.defenderHp / hpStart[defenderSide]) * 100)
     await sleep(TIMING.landedImpact)
@@ -794,6 +799,8 @@ function createRing(data: FightApiResponse, clock: Clock) {
           if (!line && commentary?.state === 'pending') panel.colour = WAITING_FOR_LINE
           renderCalls()
           refCue('gong-hit', REF_GONG_MS)
+          // Dźwięk gongu
+          void getSFXPlayer().play('gong')
           await sleep(TIMING.roundIntro)
           break
         }
@@ -1079,12 +1086,16 @@ async function drawLadder(): Promise<void> {
 export default function Home() {
   const busy = useRef(false)
   const clock = useRef<Clock>({ skip: false })
+  const [sfxMuted, setSfxMuted] = useState(true) // domyślnie wyciszone
 
   // Drabina wczytuje się raz, po zamontowaniu. `useEffect` nie dodaje stanu,
   // więc komponent nadal nigdy się nie przerysowuje i nie czyści ringu
   // w połowie rundy.
   useEffect(() => {
     void drawLadder()
+    // Wczytaj stan SFX z localStorage
+    const sfx = getSFXPlayer()
+    setSfxMuted(sfx.isMuted())
   }, [])
 
   function loadSample() {
@@ -1096,6 +1107,13 @@ export default function Home() {
   function onSkip() {
     clock.current.skip = true
     need('skip').hidden = true
+  }
+
+  function toggleSFX() {
+    const sfx = getSFXPlayer()
+    const newMuted = !sfx.isMuted()
+    sfx.setMuted(newMuted)
+    setSfxMuted(newMuted)
   }
 
   /**
@@ -1208,7 +1226,7 @@ export default function Home() {
       // Kwestia ostatniej rundy zrobiła swoje — zostawiona, spychała werdykt
       // (puentę całej walki) tak nisko, że panel sędziego zasłaniał ring.
       need('calls').innerHTML = ''
-      drawRead(data.tokenA, data.tokenB)
+      drawRead(data.tokenA, data.tokenB, data.tracked)
       drawVerdict(data)
       drawWhy(data)
 
@@ -1263,10 +1281,9 @@ export default function Home() {
       </div>
 
       {/* Dyskretna linijka w lewym górnym rogu, w wolnym polu nad kartami: nie
-          leży w środku ekranu, więc nie konkuruje z przyciskiem walki. Liczba
-          modeli jest stałą z `lib/orbio-stack.ts`, nie wpisaną z pamięci. */}
+          leży w środku ekranu, więc nie konkuruje z przyciskiem walki. */}
       <p className="stack-line">
-        <span>{modelsLabel()}</span>&nbsp;· <span>one Orbio key</span>&nbsp;· <span>Orbio Build Week</span>
+        <span>Many Models</span>&nbsp;· <span>one <span style={{ color: 'var(--gold)' }}>$ORBIO</span> key</span>&nbsp;· <span>Orbio Build Week</span>
       </p>
 
       <main className="stage-floor">
@@ -1294,9 +1311,19 @@ export default function Home() {
               klikalny. */}
           <div className="bottom">
             <span className="status" id="arena-status" style={{ margin: 0, textAlign: 'left' }} />
-            <button id="skip" type="button" onClick={onSkip} hidden>
-              Skip to result
-            </button>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button
+                type="button"
+                onClick={toggleSFX}
+                style={{ fontSize: '0.75rem', padding: '0.25rem 0.5rem' }}
+                title={sfxMuted ? 'Enable sound effects' : 'Disable sound effects'}
+              >
+                {sfxMuted ? '🔇 Sound off' : '🔊 Sound on'}
+              </button>
+              <button id="skip" type="button" onClick={onSkip} hidden>
+                Skip to result
+              </button>
+            </div>
           </div>
           <div className="ring">
             <div className="backdrop" />
