@@ -47,3 +47,10 @@ public/arena/*.png
 # w czasie dzialania, wiec bez nich deploy z gita ma ring bez sedziego.
 !public/arena/sahur.png
 !public/arena/club.png
+# Grafiki zawodnikow tez: fighter-svg.ts wciaga je w czasie dzialania, wiec bez
+# nich deploy z gita ma ring bez byka i bez niebieskiego. Wyjatkiem nie sa
+# niedzwiedz (bear-*.png, nieuzywany od zmiany niebieskiego narozniku) ani
+# bikeT-original.png (oryginal 1000x1000, 790 KB, kopia zapasowa).
+!public/arena/bull-guard.png
+!public/arena/bull-punch.png
+!public/arena/bikeT.png
