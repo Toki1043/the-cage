@@ -27,7 +27,7 @@ import type { FightResult, Side } from '@/lib/fight'
 import type { FightApiResponse } from '@/lib/fight-response'
 import type { BoardEntry as LadderEntry, Leaderboard as LadderResponse } from '@/lib/leaderboard'
 import type { FightStats, WeightClassId } from '@/lib/stats'
-import type { CommentaryLine, CommentaryRequest } from './api/commentary/route'
+import type { CommentaryEvent, CommentaryLine, CommentaryRequest } from '@/lib/commentary'
 import { drawFighter } from '@/lib/fighter-svg'
 import { drawReferee } from '@/lib/referee-svg'
 import {
@@ -71,6 +71,9 @@ const SAMPLE = {
 }
 
 /** Kategorie wagowe po angielsku — backend trzyma etykiety po polsku. */
+/** Zdanie w panelu, dopóki kwestia danej rundy nie dojdzie z modelu. */
+const WAITING_FOR_LINE = 'The commentators are still on the line…'
+
 const WEIGHT_LABELS: Record<WeightClassId, string> = {
   musza: 'Flyweight',
   lekka: 'Lightweight',
@@ -212,24 +215,108 @@ function commentaryPayload(data: FightApiResponse): CommentaryRequest {
   }
 }
 
-async function fetchCommentary(data: FightApiResponse): Promise<CommentaryLine[] | null> {
-  try {
-    const response = await fetch('/api/commentary', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(commentaryPayload(data)),
-    })
-    const body: unknown = await response.json().catch(() => null)
-    if (!response.ok) {
-      const code = (body as { error?: string } | null)?.error ?? 'upstream'
-      need('arena-status').textContent = errCopy(code)
-      return null
-    }
-    return (body as { rounds?: CommentaryLine[] } | null)?.rounds ?? null
-  } catch {
-    need('arena-status').textContent = errCopy('upstream')
-    return null
+/**
+ * Kwestie komentatorów, które dochodzą w trakcie walki.
+ *
+ * Walka nie czeka na komentarz: startuje od razu, a każda runda dokleja się do
+ * panelu w chwili, gdy model ją domknie. `lines[i]` jest puste, dopóki runda
+ * `i + 1` nie dojdzie; `onLine` woła się przy każdej, która dojdzie.
+ */
+interface Commentary {
+  lines: (CommentaryLine | undefined)[]
+  onLine: ((index: number, line: CommentaryLine) => void) | null
+  /** `pending` do końca strumienia; potem `done` (są kwestie) albo `failed` (nie ma żadnej). */
+  state: 'pending' | 'done' | 'failed'
+  /** Przerywa strumień; serwer przerywa wtedy wywołanie modelu. */
+  abort: () => void
+}
+
+/**
+ * Otwiera strumień NDJSON z `/api/commentary` i zwraca od razu, bez czekania.
+ *
+ * Nigdy nie rzuca: brak komentarza nie może przewrócić walki. Awaria kończy się
+ * zdaniem w `arena-status` i stanem `failed`, a kwestie, które już doszły,
+ * zostają nawet wtedy, gdy strumień urwie się po drodze.
+ */
+function openCommentary(
+  data: FightApiResponse,
+  onSettled: (state: 'done' | 'failed') => void,
+): Commentary {
+  const controller = new AbortController()
+  const commentary: Commentary = {
+    lines: [],
+    onLine: null,
+    state: 'pending',
+    abort: () => controller.abort(),
   }
+
+  const settle = (state: 'done' | 'failed', code?: string) => {
+    if (commentary.state !== 'pending') return
+    commentary.state = state
+    if (state === 'failed') need('arena-status').textContent = errCopy(code ?? 'upstream')
+    onSettled(state)
+  }
+
+  const handle = (raw: string) => {
+    if (!raw.trim()) return
+    let event: CommentaryEvent
+    try {
+      event = JSON.parse(raw) as CommentaryEvent
+    } catch {
+      return
+    }
+    if (event.type === 'round') {
+      const line = { call: event.call, colour: event.colour }
+      commentary.lines[event.index] = line
+      commentary.onLine?.(event.index, line)
+    } else if (event.type === 'done') {
+      settle('done')
+    } else {
+      // Błąd po części rund nie unieważnia tych, które już są.
+      settle(commentary.lines.some(Boolean) ? 'done' : 'failed', event.code)
+    }
+  }
+
+  void (async () => {
+    try {
+      const response = await fetch('/api/commentary', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(commentaryPayload(data)),
+        signal: controller.signal,
+      })
+      if (!response.ok || !response.body) {
+        // Błędy sprzed pierwszego tokenu wracają jako zwykły JSON ze statusem.
+        const body: unknown = await response.json().catch(() => null)
+        settle('failed', (body as { error?: string } | null)?.error ?? 'upstream')
+        return
+      }
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      for (;;) {
+        const { value, done } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        let newline = buffer.indexOf('\n')
+        while (newline !== -1) {
+          handle(buffer.slice(0, newline))
+          buffer = buffer.slice(newline + 1)
+          newline = buffer.indexOf('\n')
+        }
+      }
+      handle(buffer)
+      // Strumień skończył się bez `done` i bez `error` (urwane połączenie).
+      settle(commentary.lines.some(Boolean) ? 'done' : 'failed', 'upstream')
+    } catch {
+      // Przerwanie przez nas (koniec walki) to nie błąd i nic nie ma do pokazania.
+      if (controller.signal.aborted) return
+      settle(commentary.lines.some(Boolean) ? 'done' : 'failed', 'upstream')
+    }
+  })()
+
+  return commentary
 }
 
 /* ------------------------------------------------------------------ */
@@ -613,7 +700,20 @@ function createRing(data: FightApiResponse, clock: Clock) {
     renderCalls()
   }
 
-  async function play(commentary: CommentaryLine[] | null) {
+  async function play(commentary: Commentary | null) {
+    // Runda, której kwestie są teraz na ekranie. Linia z modelu, która dojdzie
+    // w trakcie tej rundy, dokleja się do panelu; ta, która dojdzie za późno
+    // (runda już minęła), nie nadpisze kwestii kolejnej.
+    let currentRound = 0
+    if (commentary) {
+      commentary.onLine = (index, line) => {
+        if (index + 1 !== currentRound) return
+        panel.call = line.call
+        panel.colour = line.colour
+        renderCalls()
+      }
+    }
+
     for (const event of data.fight.events) {
       switch (event.type) {
         // Badania przed pierwszym dzwonkiem. Zawodnik z zbyt małą liczbą
@@ -668,10 +768,12 @@ function createRing(data: FightApiResponse, clock: Clock) {
         }
         case 'roundStart': {
           setRoundTag(`Round ${event.round} of ${SCHEDULED_ROUNDS}`)
-          const line = commentary?.[event.round - 1]
+          currentRound = event.round
+          const line = commentary?.lines[event.round - 1]
           panel.ref = ''
           panel.call = line?.call ?? ''
-          panel.colour = line?.colour ?? ''
+          // Kwestia jeszcze nie doszła: zdanie zastępcze, które `onLine` podmieni.
+          panel.colour = line?.colour ?? (commentary?.state === 'pending' ? WAITING_FOR_LINE : '')
           renderCalls()
           refCue('gong-hit', REF_GONG_MS)
           await sleep(TIMING.roundIntro)
@@ -721,6 +823,8 @@ function createRing(data: FightApiResponse, clock: Clock) {
         }
       }
     }
+    // Walka skończona: kolejne kwestie nie mają już dokąd wracać.
+    if (commentary) commentary.onLine = null
   }
 
   return { reset, play }
@@ -1034,6 +1138,23 @@ export default function Home() {
       const data = body as FightApiResponse
       status.textContent = ''
 
+      // Komentarz startuje tu, równolegle z resztą, i nikt na niego nie czeka.
+      // Walka ma ruszyć od razu; tekst rund dokleja się, gdy dojdzie ze
+      // strumienia. Nie ma rund (walkower, odwołanie) — nie ma czego komentować
+      // i nie wołamy modelu.
+      need('arena-status').textContent = ''
+      const commentary =
+        data.fight.rounds.length > 0
+          ? openCommentary(data, (state) => {
+              if (state === 'failed') {
+                need('note').textContent = 'Result is maths. No commentary on this one.'
+              }
+            })
+          : null
+      need('note').textContent = commentary
+        ? 'Result is maths. Commentary is a model.'
+        : 'Result is maths. No commentary on this one.'
+
       fillCorner('a', data.tokenA)
       fillCorner('b', data.tokenB)
       fillTracked(data)
@@ -1044,17 +1165,14 @@ export default function Home() {
       const ring = createRing(data, clock.current)
       ring.reset()
 
-      // Komentarz przed pierwszym gongiem: kwestie z rundy pierwszej muszą
-      // być gotowe, zanim ruszy animacja. Walka i tak się odbędzie, jeśli
-      // ich nie będzie.
-      need('arena-status').textContent = ''
-      const commentary = await fetchCommentary(data)
-      need('note').textContent = commentary
-        ? 'Result is maths. Commentary is a model.'
-        : 'Result is maths. No commentary on this one.'
-
       need('skip').hidden = false
-      await ring.play(commentary)
+      try {
+        await ring.play(commentary)
+      } finally {
+        // Koniec walki (albo skip): reszta strumienia nikomu nie jest potrzebna,
+        // a przerwanie zatrzymuje też model po stronie serwera.
+        commentary?.abort()
+      }
       need('skip').hidden = true
 
       need('roundtag').textContent = 'Final'

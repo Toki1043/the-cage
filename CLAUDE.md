@@ -97,6 +97,28 @@ Dokładnie 200 przechodzi. Gdy Codex nie zwróci liczby holderów, zapytanie ko�
 błędem, a nie walkowerem: zero z braku danych byłoby wynikiem wziętym znikąd.
 Zawodnik z obiema wadami dostaje jeden powód — holderów.
 
+## Komentarz (`/api/commentary`)
+
+Walka nigdy nie czeka na komentarz. Front startuje żądanie w tej samej chwili, w której
+dostaje wynik z `/api/fight`, i od razu odgrywa walkę; tekst rundy dokleja się do panelu,
+gdy dojdzie. Trasa zwraca strumień NDJSON (`round` / `done` / `error`), a każda runda
+wychodzi, gdy tylko model domknie jej obiekt. Kod: `src/lib/commentary.ts`.
+
+- Nie wracaj do `await` na komentarzu przed `ring.play()`. To było 6–7 s martwego czasu
+  przed pierwszym dzwonkiem, a sam model nie był tam wąskim gardłem.
+- Zmierzone (Sonnet 4.5 przez Orbio): ~1,8 s stałego opóźnienia do modelu, wyjście ~270–315
+  tokenów przy ~55 tok/s, pierwsza runda po ~3,5 s, całość po ~6,6–7,9 s. Haiku 4.5: pierwsza
+  runda ~2,5 s, całość ~4,5–5,4 s, ale to inny głos. Model zmienia `OPENROUTER_MODEL`;
+  `npm run check:commentary` mierzy dowolny (`MODEL=...`, `LIST=1` pokazuje slugi).
+- Koniec walki albo skip przerywa strumień, a serwer przerywa wywołanie modelu.
+- Bez rund (walkower, odwołanie) nie ma czego komentować i model nie jest wołany.
+- Model nadal widzi wyłącznie policzone liczby i nigdy wyniku.
+- Limit zapytań na IP: `PER_IP_LIMIT` (10 na minutę) z `lib/rate-limit.ts`, ten sam co na
+  `/api/fight`, ale we własnym wiadrze — jedna walka to po jednym wywołaniu każdej trasy,
+  więc wspólny licznik zjadałby dwa zapytania na walkę. Kontrola jest przed odczytem ciała
+  i przed modelem, a liczy się też błędny ładunek. Bez Upstasha licznik jest per instancja,
+  więc na Vercelu realny próg to wielokrotność 10 na minutę; do produkcji podłącz Upstash.
+
 ## Skan kontraktu (GoPlus)
 
 Publiczny endpoint, bez klucza: `https://api.gopluslabs.io/api/v1/token_security/{chainId}?contract_addresses={adres}`.

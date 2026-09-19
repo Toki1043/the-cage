@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { fetchTokenFightData } from '@/lib/codex'
 import { simulateFight } from '@/lib/fight'
 import { recordFight, readRecord, type TokenRecord } from '@/lib/leaderboard'
-import { clientIp, rateLimit, rateLimitHeaders } from '@/lib/rate-limit'
+import { PER_IP_LIMIT, clientIp, rateLimit, rateLimitHeaders } from '@/lib/rate-limit'
 import { matchup } from '@/lib/stats'
 import { trackedWallets } from '@/lib/tracked'
 
@@ -21,7 +21,7 @@ const DEFAULT_NETWORK_ID = 4663
  * Drugi powód jest w `tracked.ts`: licznik obserwowanych portfeli da się
  * sondować walka po walce. Limit tego nie zamyka, ale podnosi koszt.
  */
-const RATE_LIMIT = { limit: 10, windowSeconds: 60 }
+const RATE_LIMIT = PER_IP_LIMIT
 
 /**
  * GET /api/fight?a=0x...&b=0x...&network=4663

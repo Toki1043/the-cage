@@ -56,6 +56,19 @@ export function clientIp(headers: Headers): string {
   return cleaned || 'local'
 }
 
+/**
+ * Limit na IP dla tras, które kosztują pieniądze albo darmowy budżet API:
+ * dziesięć zapytań na minutę.
+ *
+ * Jedna definicja dla `/api/fight` (Codex) i `/api/commentary` (model), żeby
+ * „taki sam limit" nie rozjechał się przy pierwszej zmianie jednego z nich.
+ * Każda trasa liczy we **własnym wiadrze** (pierwszy argument `rateLimit`):
+ * jedna walka to jedno wywołanie każdej z nich, więc wspólny licznik
+ * zjadałby dwa zapytania na walkę i realny limit spadłby do pięciu walk
+ * na minutę.
+ */
+export const PER_IP_LIMIT = { limit: 10, windowSeconds: 60 } as const
+
 export interface RateLimitOptions {
   /** Ile zapytań na okno. */
   limit: number
