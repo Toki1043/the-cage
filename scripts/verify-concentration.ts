@@ -316,6 +316,7 @@ function tokenData(f: FighterInput, percent: number | null): TokenFightData {
     networkId: 4663,
     stats: computeStats(raw),
     vulnerability: computeVulnerability(raw),
+    velocity: raw.volume24hUsd / raw.liquidityUsd,
     survivalBonus: 0,
     holderGate: holderGate(raw.holders),
     honeypotGate: honeypotGate(securityUnavailable(4663, 'test')),
