@@ -1,5 +1,9 @@
 /**
- * Komentarz do walki: wejście, prompt i odczyt odpowiedzi modelu.
+ * Komentarz do walki: wejście, prompt i odczyt odpowiedzi modeli.
+ *
+ * Komentatorów jest dwóch i to dwa różne modele u dwóch dostawców, wołane
+ * równolegle: głos przy ringu (`call`) i głos barwny (`colour`). Każdy ma
+ * własny prompt i własny strumień; jeden może paść, a drugi dalej mówi.
  *
  * Czysty kod, bez sieci i bez env — trasa `/api/commentary` jest cienką
  * warstwą na wierzchu, a skrypty (`verify:commentary`, `check:commentary`)
@@ -21,6 +25,7 @@
  * każde pole jest wyłuskane i przepisane pojedynczo, nigdy `...body`.
  */
 import type { WeightClassId } from './stats'
+import { COMMENTARY_VOICES, type CommentaryVoice } from './commentary-voices.ts'
 
 /* ------------------------------------------------------------------ */
 /* Wejście                                                             */
@@ -54,6 +59,7 @@ export interface CommentaryRequest {
   rounds: CommentaryRoundInput[]
 }
 
+/** Kwestie jednej rundy po złożeniu głosów; brakujący głos to pusty łańcuch. */
 export interface CommentaryLine {
   call: string
   colour: string
@@ -73,13 +79,17 @@ export type CommentaryErrorCode =
 /**
  * Zdarzenia strumienia NDJSON z `/api/commentary`: jedna linia JSON na zdarzenie.
  *
- * `round` przychodzi, gdy model skończy pisać daną rundę — front dokleja ją do
- * walki od razu, nie czekając na resztę. `done` i `error` zamykają strumień;
- * błąd po pierwszej rundzie nie unieważnia rund, które już doszły.
+ * `line` przychodzi, gdy dany model skończy pisać daną rundę — front dokleja ją
+ * do walki od razu, nie czekając ani na resztę rund, ani na drugi głos.
+ * `voice_error` mówi, że jeden z dwóch głosów padł (przed pierwszym tokenem albo
+ * w trakcie); drugi mówi dalej i walka idzie normalnie. `done` i `error`
+ * zamykają strumień: `error` tylko wtedy, gdy nie doszła żadna kwestia,
+ * a błąd po części rund nie unieważnia rund, które już doszły.
  */
 export type CommentaryEvent =
-  | { type: 'round'; index: number; call: string; colour: string }
-  | { type: 'done'; model: string }
+  | { type: 'line'; voice: CommentaryVoice; index: number; text: string }
+  | { type: 'voice_error'; voice: CommentaryVoice; code: CommentaryErrorCode }
+  | { type: 'done'; models: Record<CommentaryVoice, string>; failed: CommentaryVoice[] }
   | { type: 'error'; code: CommentaryErrorCode }
 
 /**
@@ -234,41 +244,77 @@ function fightSheet(a: CleanFighter, b: CleanFighter, rounds: CleanRound[]): str
   return lines.join('\n')
 }
 
-const SYSTEM = [
-  'You are the two-man commentary team at a boxing match where the fighters are crypto tokens.',
-  'Ringside voice: fast, factual, calls the action. Colour voice: an ex-fighter who takes every punch personally and keeps drifting into stories about his own losses.',
-  '',
+/**
+ * Limity znaków kwestii na głos. Front ma dla każdej własny wiersz w panelu,
+ * a `tidy` ucina to, co model mimo prośby rozpisał.
+ */
+export const VOICE_LIMITS: Record<CommentaryVoice, number> = { call: 140, colour: 110 }
+
+/** Wspólna część: kim jest para komentatorów, czego nie wolno i skąd są liczby. */
+const SHARED_RULES = [
   'The fight has already been decided by a simulation you cannot see. You are NOT told who won, and you must not guess, hint at, or announce a result — the referee does that. Call only what is on the sheet.',
   "Each fighter's stats come from real chain data: stamina is liquidity, power is 24h trading volume, guard is holder distribution, speed is how young the pair is. Glass jaw is market cap relative to liquidity: the higher it is, the less the fighter can take and the harder every punch lands on him.",
   'Work the real numbers in — a token that only just cleared the 200-holder minimum to enter the ring should get mocked for the size of its crowd.',
   '',
   'Hard rules:',
   '- Use only the numbers on the sheet. Invent no facts about either token: no team, no narrative, no listings, no history.',
+  '- Never say who is ahead, who took a round, or who is winning on the cards. The numbers describe a round; the referee scores the fight.',
   '- No price prediction, no trend reading, no "bullish" or "bearish", no buy or sell advice.',
   '- No emoji.',
   '- Output JSON only, no code fence, no commentary outside the JSON.',
-].join('\n')
+]
 
-function userPrompt(sheet: string, roundCount: number): string {
+/**
+ * Charakter każdego głosu. Dwa różne modele plus dwa różne polecenia: przy
+ * ringu krótko i po faktach, z krzesła obok — osobiście i z boku.
+ */
+const PERSONA: Record<CommentaryVoice, string[]> = {
+  call: [
+    'You are the ringside voice of a two-man commentary team at a boxing match where the fighters are crypto tokens.',
+    'Your job is the play-by-play: fast, factual, present tense. Say who threw, who landed, how much damage, who hit the canvas. Short, punchy sentences. Your partner does the colour; you never drift into stories.',
+  ],
+  colour: [
+    'You are the colour voice of a two-man commentary team at a boxing match where the fighters are crypto tokens.',
+    'You are an ex-fighter who takes every punch personally and keeps drifting into stories about his own losses. Your partner calls the action, so you never do: you react to the numbers on the sheet and to what they must feel like, in dry, wounded, slightly rambling humour.',
+  ],
+}
+
+function systemPrompt(voice: CommentaryVoice): string {
+  return [...PERSONA[voice], '', ...SHARED_RULES].join('\n')
+}
+
+const EXAMPLES: Record<CommentaryVoice, string> = {
+  call: '{"rounds":[{"call":"SLOP comes out swinging and there is nothing behind it."}]}',
+  colour: '{"rounds":[{"colour":"Two hundred and ten holders. I had more people at my divorce."}]}',
+}
+
+function userPrompt(voice: CommentaryVoice, sheet: string, roundCount: number): string {
   return [
     sheet,
     '',
-    'Reply with only JSON: {"rounds":[{"call":string,"colour":string}]}',
+    `Reply with only JSON: {"rounds":[{"${voice}":string}]}`,
     `One entry per round, in order, ${roundCount} total.`,
-    "'call' at most 140 characters, 'colour' at most 110.",
-    'Example: {"rounds":[{"call":"SLOP comes out swinging and there is nothing behind it.","colour":"Two hundred and ten holders. I had more people at my divorce."}]}',
+    `'${voice}' at most ${VOICE_LIMITS[voice]} characters.`,
+    `Example: ${EXAMPLES[voice]}`,
   ].join('\n')
 }
 
-export function commentaryMessages(
+/** Wiadomości dla jednego głosu. Ta sama karta walki, inny charakter. */
+export function voiceMessages(
+  voice: CommentaryVoice,
   a: CleanFighter,
   b: CleanFighter,
   rounds: CleanRound[],
 ): { role: 'system' | 'user'; content: string }[] {
   return [
-    { role: 'system', content: SYSTEM },
-    { role: 'user', content: userPrompt(fightSheet(a, b, rounds), rounds.length) },
+    { role: 'system', content: systemPrompt(voice) },
+    { role: 'user', content: userPrompt(voice, fightSheet(a, b, rounds), rounds.length) },
   ]
+}
+
+/** Wiadomości dla wszystkich głosów, w kolejności `COMMENTARY_VOICES`. */
+export function commentaryMessages(a: CleanFighter, b: CleanFighter, rounds: CleanRound[]) {
+  return COMMENTARY_VOICES.map((voice) => ({ voice, messages: voiceMessages(voice, a, b, rounds) }))
 }
 
 /* ------------------------------------------------------------------ */
@@ -383,9 +429,71 @@ export function completedRoundObjects(text: string): unknown[] {
   return found
 }
 
-/** Wpis rundy z odpowiedzi modelu → kwestie po oczyszczeniu i przycięciu. */
-export function toLine(entry: unknown): CommentaryLine {
-  const e = (entry ?? {}) as { call?: unknown; colour?: unknown }
-  return { call: tidy(e.call, 140), colour: tidy(e.colour, 110) }
+/** Wpis rundy z odpowiedzi jednego modelu → jego kwestia po oczyszczeniu i przycięciu. */
+export function toVoiceText(entry: unknown, voice: CommentaryVoice): string {
+  const e = (entry ?? {}) as Record<string, unknown>
+  return tidy(e[voice], VOICE_LIMITS[voice])
 }
 
+/**
+ * Konwertuje entry na CommentaryLine z oboma głosami.
+ * Używane przez route do emisji rund w strumieniu.
+ */
+export function toLine(entry: unknown): CommentaryLine {
+  return {
+    call: toVoiceText(entry, 'call'),
+    colour: toVoiceText(entry, 'colour'),
+  }
+}
+
+/**
+ * Odczyt strumienia jednego głosu: dostaje kawałki tekstu, oddaje kwestie, które
+ * właśnie się domknęły. Ta sama logika co dawniej w trasie (skaner obiektów,
+ * a na końcu parsowanie całości jako ostatnia szansa), tylko osobno dla każdego
+ * głosu i bez sieci, więc da się ją ćwiczyć w `verify:commentary`.
+ *
+ * Kwestie puste po oczyszczeniu (np. same emoji) nie wychodzą: front i tak nic by
+ * z nich nie pokazał, a `texts` liczy tylko te, które wyszły.
+ */
+export interface VoiceLine {
+  index: number
+  text: string
+}
+
+export function voiceScanner(voice: CommentaryVoice, expected: number) {
+  let text = ''
+  let emitted = 0
+  let texts = 0
+
+  const drain = (entries: unknown[]): VoiceLine[] => {
+    const out: VoiceLine[] = []
+    while (emitted < Math.min(entries.length, expected)) {
+      const line = toVoiceText(entries[emitted], voice)
+      if (line) {
+        texts++
+        out.push({ index: emitted, text: line })
+      }
+      emitted++
+    }
+    return out
+  }
+
+  return {
+    /** Kolejny kawałek tekstu z modelu → kwestie domknięte od poprzedniego wołania. */
+    push(chunk: string): VoiceLine[] {
+      text += chunk
+      return drain(completedRoundObjects(text))
+    },
+    /** Koniec strumienia: jeśli skaner nic nie rozpoznał, próbujemy sparsować całość. */
+    finish(): VoiceLine[] {
+      if (emitted > 0) return []
+      const parsed = parseModelJson(text) as { rounds?: unknown } | null
+      const entries = Array.isArray(parsed?.rounds) ? (parsed!.rounds as unknown[]) : []
+      return drain(entries.slice(0, expected))
+    },
+    /** Ile niepustych kwestii już wyszło. */
+    get texts() {
+      return texts
+    },
+  }
+}

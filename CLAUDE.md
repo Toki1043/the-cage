@@ -99,25 +99,49 @@ Zawodnik z obiema wadami dostaje jeden powód — holderów.
 
 ## Komentarz (`/api/commentary`)
 
+Komentatorów jest dwóch i to **dwa różne modele u dwóch dostawców**, wołane równolegle
+tym samym kluczem Orbio: komentator przy ringu (`call`, `anthropic/claude-sonnet-4.5`)
+i komentator barwny (`colour`, `google/gemini-3.5-flash`). Każdy ma własny prompt (inny
+charakter) i własny strumień; trasa skleja je w jeden. Sędzia nie jest modelem.
+
 Walka nigdy nie czeka na komentarz. Front startuje żądanie w tej samej chwili, w której
 dostaje wynik z `/api/fight`, i od razu odgrywa walkę; tekst rundy dokleja się do panelu,
-gdy dojdzie. Trasa zwraca strumień NDJSON (`round` / `done` / `error`), a każda runda
-wychodzi, gdy tylko model domknie jej obiekt. Kod: `src/lib/commentary.ts`.
+gdy dojdzie. Trasa zwraca strumień NDJSON (`line` / `voice_error` / `done` / `error`),
+a każda kwestia wychodzi, gdy tylko jej model domknie obiekt rundy. Głosy nie czekają
+na siebie. Kod: `src/lib/commentary.ts` (prompty, skaner), `src/lib/commentary-run.ts`
+(orkiestracja dwóch głosów, testowana offline), `src/lib/commentary-voices.ts`.
 
 - Nie wracaj do `await` na komentarzu przed `ring.play()`. To było 6–7 s martwego czasu
   przed pierwszym dzwonkiem, a sam model nie był tam wąskim gardłem.
-- Zmierzone (Sonnet 4.5 przez Orbio): ~1,8 s stałego opóźnienia do modelu, wyjście ~270–315
-  tokenów przy ~55 tok/s, pierwsza runda po ~3,5 s, całość po ~6,6–7,9 s. Haiku 4.5: pierwsza
-  runda ~2,5 s, całość ~4,5–5,4 s, ale to inny głos. Model zmienia `OPENROUTER_MODEL`;
-  `npm run check:commentary` mierzy dowolny (`MODEL=...`, `LIST=1` pokazuje slugi).
-- Koniec walki albo skip przerywa strumień, a serwer przerywa wywołanie modelu.
-- Bez rund (walkower, odwołanie) nie ma czego komentować i model nie jest wołany.
-- Model nadal widzi wyłącznie policzone liczby i nigdy wyniku.
+- **Padnięcie jednego głosu nie wywraca walki ani drugiego głosu.** Odmowa albo błąd
+  jednego modelu to zdarzenie `voice_error`, drugi mówi dalej, a notka pod panelem
+  mówi, kto odpadł. Zdarzenie `error` (i HTTP 502 przed strumieniem) jest dopiero wtedy,
+  gdy nie odpowie żaden. Każdy głos ma sufit czasu (`VOICE_TOTAL_TIMEOUT_MS`).
+- Modele: `OPENROUTER_MODEL` (przy ringu) i `OPENROUTER_MODEL_COLOUR` (barwny); domyślne
+  w `commentary-voices.ts`. Lista z `GET /api/v1/models` nie wystarcza: potrafi zawierać
+  modele, których nikt nie obsługuje (404), więc kandydata trzeba wywołać na żywo.
+  Gemini 3.5 Flash dostaje `reasoning: {effort: 'minimal'}`, bo inaczej rozumowanie zjada
+  limit tokenów i odpowiedź się urywa; modele GPT-5 odpadły (odrzucają `temperature`,
+  ignorują limity znaków).
+- Zmierzone przez Orbio (`npm run check:commentary`, każdy głos osobno; trasa woła je
+  naraz, więc całość trwa tyle, co wolniejszy): przy ringu (Sonnet 4.5, sam `call`, ~150–200
+  tokenów przy ~55–60 tok/s) pierwsza kwestia po ~2,9–3,3 s, całość ~4,6–5,2 s; barwny
+  (Gemini 3.5 Flash, ~85–130 tokenów) pierwsza po ~1,4–2,0 s, całość ~1,7–2,8 s.
+  Wcześniej jeden Sonnet piszący oba pola: pierwsza runda ~3,5 s, całość ~6,6–7,9 s.
+  Skrypt przyjmuje `VOICE=colour`, `MODEL=...` (z `VOICE`) i `LIST=1`.
+- Koniec walki albo skip przerywa strumień, a serwer przerywa wywołania obu modeli.
+- Bez rund (walkower, odwołanie) nie ma czego komentować i modele nie są wołane.
+- Modele nadal widzą wyłącznie policzone liczby i nigdy wyniku. Żaden z głosów nie może
+  mówić, kto prowadzi, kto wziął rundę ani kto wygrywa (rozstrzyga symulacja i sędzia);
+  `verify:commentary` pilnuje tego w promptach.
+- Liczba w nagłówku strony („2 models · one Orbio key · Orbio Build Week") wynika z liczby
+  głosów (`ORBIO_MODELS_IN_USE` w `lib/orbio-stack.ts`); dodajesz model — popraw ją.
 - Limit zapytań na IP: `PER_IP_LIMIT` (10 na minutę) z `lib/rate-limit.ts`, ten sam co na
   `/api/fight`, ale we własnym wiadrze — jedna walka to po jednym wywołaniu każdej trasy,
-  więc wspólny licznik zjadałby dwa zapytania na walkę. Kontrola jest przed odczytem ciała
-  i przed modelem, a liczy się też błędny ładunek. Bez Upstasha licznik jest per instancja,
-  więc na Vercelu realny próg to wielokrotność 10 na minutę; do produkcji podłącz Upstash.
+  więc wspólny licznik zjadałby dwa zapytania na walkę. Jedno zapytanie do komentarza to
+  dwa wywołania modeli. Kontrola jest przed odczytem ciała i przed modelem, a liczy się też
+  błędny ładunek. Bez Upstasha licznik jest per instancja, więc na Vercelu realny próg to
+  wielokrotność 10 na minutę; do produkcji podłącz Upstash.
 
 ## Skan kontraktu (GoPlus)
 

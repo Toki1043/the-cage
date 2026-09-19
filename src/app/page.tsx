@@ -31,6 +31,8 @@ import type { CommentaryEvent, CommentaryLine, CommentaryRequest } from '@/lib/c
 import { drawFighter } from '@/lib/fighter-svg'
 import { drawReferee } from '@/lib/referee-svg'
 import { HallBanners } from './hall-banners'
+import { modelsLabel } from '@/lib/orbio-stack'
+import { VOICE_NAMES, type CommentaryVoice } from '@/lib/commentary-voices'
 import {
   INSTRUCTIONS,
   fightCancelledCall,
@@ -219,15 +221,20 @@ function commentaryPayload(data: FightApiResponse): CommentaryRequest {
 /**
  * Kwestie komentatorów, które dochodzą w trakcie walki.
  *
- * Walka nie czeka na komentarz: startuje od razu, a każda runda dokleja się do
- * panelu w chwili, gdy model ją domknie. `lines[i]` jest puste, dopóki runda
- * `i + 1` nie dojdzie; `onLine` woła się przy każdej, która dojdzie.
+ * Komentatorów jest dwóch (dwa modele, dwa strumienie sklejone po stronie
+ * serwera), więc kwestie rundy dochodzą osobno i niekoniecznie razem.
+ * Walka nie czeka na żadną: startuje od razu, a każda kwestia dokleja się do
+ * panelu w chwili, gdy jej model ją domknie. `lines[i]` jest puste, dopóki do
+ * rundy `i + 1` nie dojdzie choć jedna kwestia i składa się w miarę, jak dochodzą
+ * kolejne; `onLine` woła się przy każdej.
  */
 interface Commentary {
   lines: (CommentaryLine | undefined)[]
   onLine: ((index: number, line: CommentaryLine) => void) | null
   /** `pending` do końca strumienia; potem `done` (są kwestie) albo `failed` (nie ma żadnej). */
   state: 'pending' | 'done' | 'failed'
+  /** Głosy, które padły. Drugi mówi dalej, więc to nie jest awaria komentarza. */
+  down: CommentaryVoice[]
   /** Przerywa strumień; serwer przerywa wtedy wywołanie modelu. */
   abort: () => void
 }
@@ -242,12 +249,14 @@ interface Commentary {
 function openCommentary(
   data: FightApiResponse,
   onSettled: (state: 'done' | 'failed') => void,
+  onVoiceDown: (down: CommentaryVoice[]) => void,
 ): Commentary {
   const controller = new AbortController()
   const commentary: Commentary = {
     lines: [],
     onLine: null,
     state: 'pending',
+    down: [],
     abort: () => controller.abort(),
   }
 
@@ -266,10 +275,16 @@ function openCommentary(
     } catch {
       return
     }
-    if (event.type === 'round') {
-      const line = { call: event.call, colour: event.colour }
+    if (event.type === 'line') {
+      // Kwestia jednego z dwóch głosów: dokładamy ją do tej rundy, druga może
+      // już tam być albo dojdzie później (albo nigdy, jeśli ten głos padł).
+      const line = commentary.lines[event.index] ?? { call: '', colour: '' }
+      line[event.voice] = event.text
       commentary.lines[event.index] = line
       commentary.onLine?.(event.index, line)
+    } else if (event.type === 'voice_error') {
+      if (!commentary.down.includes(event.voice)) commentary.down.push(event.voice)
+      onVoiceDown(commentary.down)
     } else if (event.type === 'done') {
       settle('done')
     } else {
@@ -773,8 +788,10 @@ function createRing(data: FightApiResponse, clock: Clock) {
           const line = commentary?.lines[event.round - 1]
           panel.ref = ''
           panel.call = line?.call ?? ''
-          // Kwestia jeszcze nie doszła: zdanie zastępcze, które `onLine` podmieni.
-          panel.colour = line?.colour ?? (commentary?.state === 'pending' ? WAITING_FOR_LINE : '')
+          panel.colour = line?.colour ?? ''
+          // Żadna kwestia tej rundy jeszcze nie doszła: zdanie zastępcze, które
+          // `onLine` podmieni, gdy dojdzie pierwsza (z któregokolwiek głosu).
+          if (!line && commentary?.state === 'pending') panel.colour = WAITING_FOR_LINE
           renderCalls()
           refCue('gong-hit', REF_GONG_MS)
           await sleep(TIMING.roundIntro)
@@ -1146,14 +1163,25 @@ export default function Home() {
       need('arena-status').textContent = ''
       const commentary =
         data.fight.rounds.length > 0
-          ? openCommentary(data, (state) => {
-              if (state === 'failed') {
-                need('note').textContent = 'Result is maths. No commentary on this one.'
-              }
-            })
+          ? openCommentary(
+              data,
+              (state) => {
+                if (state === 'failed') {
+                  need('note').textContent = 'Result is maths. No commentary on this one.'
+                }
+              },
+              // Jeden głos padł, drugi mówi: walka i komentarz idą dalej, a notka
+              // mówi prawdę o tym, kto został.
+              (down) => {
+                need('note').textContent =
+                  'Result is maths. Commentary is two models, but the ' +
+                  down.map((voice) => VOICE_NAMES[voice]).join(' and the ') +
+                  ' dropped out.'
+              },
+            )
           : null
       need('note').textContent = commentary
-        ? 'Result is maths. Commentary is a model.'
+        ? 'Result is maths. Commentary is two models.'
         : 'Result is maths. No commentary on this one.'
 
       fillCorner('a', data.tokenA)
@@ -1233,6 +1261,13 @@ export default function Home() {
             GoPlus mieszkają za „?" w karcie narożnika — na środku ekranu przed
             walką nie ma dla nich miejsca. */}
       </div>
+
+      {/* Dyskretna linijka w lewym górnym rogu, w wolnym polu nad kartami: nie
+          leży w środku ekranu, więc nie konkuruje z przyciskiem walki. Liczba
+          modeli jest stałą z `lib/orbio-stack.ts`, nie wpisaną z pamięci. */}
+      <p className="stack-line">
+        <span>{modelsLabel()}</span>&nbsp;· <span>one Orbio key</span>&nbsp;· <span>Orbio Build Week</span>
+      </p>
 
       <main className="stage-floor">
         <section className="arena" id="arena" hidden>

@@ -53,6 +53,7 @@ function fighter(index: number, tag: 'a' | 'b'): FighterInput {
     // Podatność po całej skali, tak jak statystyki — ta sama zasada co
     // w `verify:fight`. Bramka przepuszcza: liczy się rozkład samych walk.
     vulnerability: Math.round(rnd() * 100),
+    survivalBonus: 0,
     holderGate: holderGate(10_000),
     honeypotGate: honeypotGate(securityUnavailable(4663, 'test')),
     concentration: clear,

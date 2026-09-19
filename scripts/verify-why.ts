@@ -5,14 +5,14 @@
  * Panel ma jedną obietnicę: każda liczba w nim jest tą, z której powstała
  * statystyka, i nic w nim nie pochodzi z modelu. Test stoi więc na tym samym
  * mapowaniu co API (`computeStats`) i na liczbach kontrolnych z CLAUDE.md:
- * AI → wytrzymałość 67, siła 60, garda 73, szybkość 39, podatność 70.
+ * AI → wytrzymałość 67, siła 60, garda 73, szybkość 3 (z rotacji 0.47x), podatność 70.
  */
 import { simulateFight } from '../src/lib/fight.ts'
 import type { TokenFightData } from '../src/lib/codex.ts'
 import { concentrationUnavailable, concentrationVerdict } from '../src/lib/concentration.ts'
 import { holderGate } from '../src/lib/holder-gate.ts'
 import { honeypotGate, type ContractSecurity, type SecurityChecks } from '../src/lib/security.ts'
-import { computeStats, computeVulnerability, weightClass } from '../src/lib/stats.ts'
+import { computeStats, computeSurvivalBonus, computeVelocity, computeVulnerability, weightClass } from '../src/lib/stats.ts'
 import type { TrackedWallets } from '../src/lib/tracked.ts'
 import { explainFight, scanSummary, whySentence, type WhyInput } from '../src/lib/why.ts'
 
@@ -66,6 +66,8 @@ function token(
     networkId: 4663,
     stats: computeStats(raw),
     vulnerability: computeVulnerability(raw),
+    velocity: computeVelocity(raw.volume24hUsd, raw.liquidityUsd),
+    survivalBonus: computeSurvivalBonus(raw.ageDays),
     holderGate: holderGate(raw.holders),
     honeypotGate: honeypotGate(security),
     weightClass: weightClass(raw.marketCapUsd),
@@ -131,13 +133,13 @@ check('siedem wierszy w tej kolejności', why.rows.map((r) => r.id), ['stamina',
 check('wytrzymałość ← płynność: AI 67 z $2,130,000', [row('stamina').a.score, row('stamina').a.raw], [67, '$2,130,000'])
 check('siła ← obrót 24h: AI 60 z $1,000,000', [row('power').a.score, row('power').a.raw], [60, '$1,000,000'])
 check('garda ← holderzy: AI 73 z 46,755', [row('guard').a.score, row('guard').a.raw], [73, '46,755'])
-check('szybkość ← wiek pary: AI 39 z 56 d', [row('speed').a.score, row('speed').a.raw], [39, '56 d'])
+check('szybkość ← rotacja: AI 3 z 0.5× turnover', [row('speed').a.score, row('speed').a.raw], [3, '0.5× turnover'])
 check('podatność ← kapitalizacja ÷ płynność: AI 70 z 128×', [row('vulnerability').a.score, row('vulnerability').a.raw], [70, '128×'])
 check('etykiety niosą źródło', why.rows.slice(0, 5).map((r) => r.label), [
   'Stamina ← liquidity',
   'Power ← 24h volume',
   'Guard ← holders',
-  'Speed ← pair age',
+  'Speed ← turnover',
   'Vulnerability ← market cap ÷ liquidity',
 ])
 
@@ -154,7 +156,7 @@ check(
 
 console.log('\n== Formaty surowych liczb ==')
 const young = token('0x3333333333333333333333333333333333333333', 'YNG', { ...SOLID_RAW, ageDays: 2.46 })
-check('wiek poniżej 10 dni z ułamkiem', explainFight(input(young, SOLID)).rows[3].a.raw, '2.5 d')
+check('rotacja niska formatowana z ułamkiem', explainFight(input(young, SOLID)).rows[3].a.raw, '0.1× turnover')
 const dry = token('0x4444444444444444444444444444444444444444', 'DRY', { ...SOLID_RAW, liquidityUsd: 0 })
 check('zerowa płynność: krotność mówi wprost, bez dzielenia przez zero', explainFight(input(dry, SOLID)).rows[4].a.raw, 'no liquidity')
 check('symbol z HTML-a jest czyszczony', explainFight(input(token('0x5555555555555555555555555555555555555555', '<img onerror=x>', SOLID_RAW), SOLID)).symbols.a, 'imgonerrorx')

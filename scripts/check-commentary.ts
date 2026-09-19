@@ -1,8 +1,15 @@
 /**
  * Pomiar czasu komentarza na żywo — bez frontu i bez trasy.
- * Uruchomienie: npm run check:commentary
- *             MODEL=anthropic/claude-haiku-4.5 npm run check:commentary
- *             LIST=1 npm run check:commentary      (tylko lista modeli z pośrednika)
+ * Uruchomienie: npm run check:commentary                       (oba głosy, modele z `VOICE_MODELS`)
+ *             VOICE=colour npm run check:commentary            (tylko jeden głos)
+ *             VOICE=call MODEL=anthropic/claude-haiku-4.5 npm run check:commentary
+ *             LIST=1 npm run check:commentary                  (tylko lista modeli z pośrednika)
+ *
+ * Głosy są dwa (przy ringu i barwny), każdy na innym modelu; mierzymy je osobno,
+ * bo trasa woła je równolegle i całość trwa tyle, co wolniejszy. `MODEL` nadpisuje
+ * model wybranego głosu (wymaga `VOICE`). Lista z `LIST=1` pokazuje też modele,
+ * których nikt nie obsługuje (404 „No provider is currently serving this model"),
+ * więc kandydata trzeba zawsze wywołać na żywo.
  *
  * Mierzy trzy rzeczy osobno, bo każda ma inną dźwignię:
  *
@@ -18,12 +25,21 @@ import {
   COMMENTARY_MAX_TOKENS,
   cleanFighter,
   cleanRounds,
-  commentaryMessages,
   completedRoundObjects,
+  voiceMessages,
 } from '../src/lib/commentary.ts'
-import { DEFAULT_MODEL, openrouter } from '../src/lib/openrouter.ts'
+import { COMMENTARY_VOICES, type CommentaryVoice } from '../src/lib/commentary-voices.ts'
+import { VOICE_MODELS, openrouter } from '../src/lib/openrouter.ts'
 
-const MODEL = process.env.MODEL ?? DEFAULT_MODEL
+const ONLY = process.env.VOICE as CommentaryVoice | undefined
+if (ONLY && !COMMENTARY_VOICES.includes(ONLY)) {
+  console.error(`VOICE musi być jednym z: ${COMMENTARY_VOICES.join(', ')}`)
+  process.exit(1)
+}
+if (process.env.MODEL && !ONLY) {
+  console.error('MODEL nadpisuje model jednego głosu — podaj też VOICE=call albo VOICE=colour')
+  process.exit(1)
+}
 
 if (process.env.LIST) {
   const res = await fetch(`${process.env.OPENAI_BASE_URL}/models`, {
@@ -50,31 +66,38 @@ const rounds = cleanRounds([
   { round: 3, thrown: { a: 11, b: 10 }, landed: { a: 5, b: 4 }, damage: { a: 34.0, b: 21.0 }, knockdowns: { a: 0, b: 0 } },
 ])
 
+/** Kawałek strumienia w tym kształcie, jaki czytamy; `params` (np. `reasoning`) wychodzą poza typy SDK. */
+type StreamChunk = {
+  choices: { delta?: { content?: string | null } }[]
+  usage?: { prompt_tokens?: number; completion_tokens?: number } | null
+}
+
 const secs = (t0: number) => ((performance.now() - t0) / 1000).toFixed(2)
 
-async function ping(): Promise<string> {
+async function ping(voice: CommentaryVoice, model: string): Promise<string> {
   const t0 = performance.now()
-  const stream = await openrouter.chat.completions.create({
-    model: MODEL,
+  const stream = (await openrouter.chat.completions.create({
+    model,
     max_tokens: 1,
     stream: true,
     messages: [{ role: 'user', content: 'Say: ok' }],
-  })
+    ...VOICE_MODELS[voice].params,
+  } as never)) as unknown as AsyncIterable<StreamChunk>
   const headers = secs(t0)
   for await (const chunk of stream) if (chunk.choices[0]?.delta?.content) break
   return `nagłówki ${headers}s, pierwszy token ${secs(t0)}s`
 }
 
-async function real(): Promise<void> {
+async function real(voice: CommentaryVoice, model: string): Promise<void> {
   const t0 = performance.now()
-  const stream = await openrouter.chat.completions.create({
-    model: MODEL,
-    temperature: 0.8,
+  const stream = (await openrouter.chat.completions.create({
+    model,
     max_tokens: COMMENTARY_MAX_TOKENS,
     stream: true,
     stream_options: { include_usage: true },
-    messages: commentaryMessages(a, b, rounds),
-  })
+    messages: voiceMessages(voice, a, b, rounds),
+    ...VOICE_MODELS[voice].params,
+  } as never)) as unknown as AsyncIterable<StreamChunk>
   const headers = secs(t0)
 
   let text = ''
@@ -102,11 +125,14 @@ async function real(): Promise<void> {
   console.log(`  tokeny: wejście ${usage?.prompt_tokens ?? '?'}, wyjście ${out ?? '?'} (${chunks} kawałków) | ~${gen} tok/s po pierwszym tokenie | ${text.length} znaków`)
 }
 
-console.log(`\nmodel ${MODEL}, sufit ${COMMENTARY_MAX_TOKENS} tokenów\n`)
-for (let i = 1; i <= 2; i++) console.log(`pusty strzał ${i}: ${await ping()}`)
-console.log()
-for (let i = 1; i <= 3; i++) {
-  console.log(`komentarz ${i}:`)
-  await real()
+for (const voice of ONLY ? [ONLY] : COMMENTARY_VOICES) {
+  const model = process.env.MODEL ?? VOICE_MODELS[voice].model
+  console.log(`\n== głos ${voice}: ${model}, sufit ${COMMENTARY_MAX_TOKENS} tokenów ==\n`)
+  for (let i = 1; i <= 2; i++) console.log(`pusty strzał ${i}: ${await ping(voice, model)}`)
+  console.log()
+  for (let i = 1; i <= 3; i++) {
+    console.log(`komentarz ${i}:`)
+    await real(voice, model)
+  }
 }
 console.log()

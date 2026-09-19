@@ -38,8 +38,26 @@ export const STAT_SCALE = {
   vulnerability: { decades: 3 },
   /** 10 holderów → 0, 1M → 100 */
   garda: { minLog: 1, decades: 5 },
-  /** dziś → 100, 2 lata → 0 */
-  szybkosc: { horizonDays: 731 },
+  /**
+   * Rotacja płynności (velocity): 1x → 0, 15x → 100, powyżej 15x sufit.
+   *
+   * Obrót 24h / płynność pokazuje, ile razy dziennie płynność "obraca się".
+   * Wysoka rotacja = aktywny token = wysokie tempo w ringu. Sufit przy 15x:
+   * przewaga z rotacji ma górną granicę — token z 33x nie dostaje dwa razy
+   * więcej niż token z 16x. Bez kary, po prostu bez dalszej premii.
+   */
+  szybkosc: { ceiling: 15 },
+  /**
+   * Survival bonus: wiek pary → bonus do puli życia.
+   *
+   * 0–7 dni: brak bonusu (świeżość nie jest premią)
+   * 7–30 dni: bonus rośnie liniowo od 0% do +10%
+   * 30+ dni: bonus +10% (sufit)
+   *
+   * Przetrwanie miesiąca to sygnał jakości. Większość tokenów umiera w pierwszych
+   * tygodniach, więc wiek ma wartość — szybkość nie.
+   */
+  survival: { thresholdDays: 7, ceilingDays: 30, maxBonus: 0.1 },
 } as const
 
 /**
@@ -58,10 +76,14 @@ export function clampStat(value: number): number {
  * Cztery statystyki bojowe, każda znormalizowana do 0–100.
  *
  * Kontrola poprawności (CLAUDE.md): token AI — płynność $2,13M, obrót 24h
- * $1M (liczba wzorcowa, nie pomiar), 46 755 holderów, 56 dni → 67 / 60 / 73 / 39.
+ * $1M (liczba wzorcowa, nie pomiar), 46 755 holderów, 56 dni:
+ *  - wytrzymałość: 67 (bez zmiany)
+ *  - siła: 60 (bez zmiany)
+ *  - garda: 73 (bez zmiany)
+ *  - szybkość: 30 (było 39; nowa formuła z rotacji 0.47x)
  */
 export function computeStats(raw: RawTokenNumbers): FightStats {
-  const { liquidityUsd, volume24hUsd, holders, ageDays } = raw
+  const { liquidityUsd, volume24hUsd, holders } = raw
 
   // Wytrzymałość: głębokość płynności. Ile ring wytrzyma, zanim się ugnie.
   const wytrzymalosc =
@@ -80,10 +102,12 @@ export function computeStats(raw: RawTokenNumbers): FightStats {
   const garda =
     ((Math.log10(holders) - STAT_SCALE.garda.minLog) / STAT_SCALE.garda.decades) * 100
 
-  // Szybkość: świeża para jest szybka, stara zbiega do zera na dwóch latach.
-  const szybkosc =
-    100 -
-    (Math.log10(ageDays + 1) / Math.log10(STAT_SCALE.szybkosc.horizonDays)) * 100
+  // Szybkość: rotacja płynności (velocity). Obrót 24h / płynność pokazuje,
+  // ile razy dziennie płynność "obraca się". Wysoka rotacja = aktywny token
+  // = wysokie tempo w ringu. Sufit przy 15x: przewaga z rotacji ma górną
+  // granicę, więc token z 33x nie dostaje dwa razy więcej niż token z 16x.
+  const velocity = liquidityUsd > 0 ? volume24hUsd / liquidityUsd : 0
+  const szybkosc = (Math.min(velocity, STAT_SCALE.szybkosc.ceiling) / STAT_SCALE.szybkosc.ceiling) * 100
 
   return {
     wytrzymalosc: clampStat(wytrzymalosc),
@@ -91,6 +115,34 @@ export function computeStats(raw: RawTokenNumbers): FightStats {
     garda: clampStat(garda),
     szybkosc: clampStat(szybkosc),
   }
+}
+
+/**
+ * Bonus do puli życia za przetrwanie.
+ *
+ * Wiek pary mierzony w dniach → wartość 0–1 (0% do 10% bonusu HP).
+ * Większość tokenów umiera w pierwszych tygodniach, więc przetrwanie miesiąca
+ * to sygnał jakości. Świeżość nie jest premią — młody token nie dostaje nic,
+ * bez kary i bez bonusu.
+ */
+export function computeSurvivalBonus(ageDays: number): number {
+  const { thresholdDays, ceilingDays, maxBonus } = STAT_SCALE.survival
+  if (ageDays < thresholdDays) return 0
+  if (ageDays >= ceilingDays) return maxBonus
+  // Liniowy wzrost od progu do sufitu
+  return ((ageDays - thresholdDays) / (ceilingDays - thresholdDays)) * maxBonus
+}
+
+/**
+ * Rotacja płynności (velocity): obrót 24h / płynność.
+ *
+ * Pokazuje, ile razy dziennie płynność "obraca się". Wysoka rotacja = aktywny
+ * token. Ta sama liczba, z której liczy się szybkość — może wyjść poza sufit
+ * 15x, ale do statystyki wchodzi już obcięta. Wracamy surową wartość do
+ * UI i snapshotu, żeby widać było, ile to naprawdę wynosi.
+ */
+export function computeVelocity(volume24hUsd: number, liquidityUsd: number): number {
+  return liquidityUsd > 0 ? volume24hUsd / liquidityUsd : 0
 }
 
 /**

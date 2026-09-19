@@ -229,6 +229,7 @@ function fighter(address: string, symbol: string, percent: number | null): Fight
     // Zero podatności i tyle holderów, żeby bramka przepuszczała: ten skrypt
     // sprawdza koncentrację, a nie te dwie mechaniki.
     vulnerability: 0,
+    survivalBonus: 0,
     holderGate: holderGate(10_000),
     honeypotGate: honeypotGate(securityUnavailable(4663, 'test')),
     concentration: concentrationVerdict(at(percent)),
@@ -315,6 +316,7 @@ function tokenData(f: FighterInput, percent: number | null): TokenFightData {
     networkId: 4663,
     stats: computeStats(raw),
     vulnerability: computeVulnerability(raw),
+    survivalBonus: 0,
     holderGate: holderGate(raw.holders),
     honeypotGate: honeypotGate(securityUnavailable(4663, 'test')),
     weightClass: weightClass(raw.marketCapUsd),

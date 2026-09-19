@@ -336,16 +336,27 @@
   .float-card.red{border-color:var(--red);box-shadow:0 0 14px var(--red-wash),inset 0 0 18px var(--red-wash)}
   .float-card.blue{border-color:var(--blue);box-shadow:0 0 14px var(--blue-wash),inset 0 0 18px var(--blue-wash)}
 
-  .float-card.tape-card h4{margin:0 0 .5rem;display:flex;align-items:center;justify-content:space-between;
-    gap:.5rem;font-family:var(--font-pixel),var(--font-anton),Impact,sans-serif;font-weight:400;
+  .float-card.tape-card h4{margin:0 0 .5rem;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;
+    gap:.25rem .5rem;font-family:var(--font-pixel),var(--font-anton),Impact,sans-serif;font-weight:400;
     font-size:.7rem;line-height:1.5;text-transform:uppercase;color:var(--red)}
   .float-card.blue.tape-card h4{color:var(--blue)}
-  .float-card.tape-card .tick{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-  .float-card.tape-card dl{margin:0;display:grid;grid-template-columns:1fr 1fr;gap:.3rem .7rem;font-size:.74rem}
-  .float-card.tape-card dl>div{display:flex;justify-content:space-between;gap:.4rem;
+  /* Ticker nie może zapaść się do zera: `flex-wrap` w `h4` przerzuca plakietkę
+     kategorii do drugiej linii, zanim ticker dostanie mniej miejsca, niż ma
+     tekst. Ucina się (wielokropek) dopiero symbol dłuższy niż cała karta. */
+  .float-card.tape-card .tick{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;max-width:100%}
+  /* `minmax(0,1fr)` zamiast `1fr`: `1fr` ma minimum równe najszerszej zawartości,
+     więc wąska karta rozpychała siatkę poza własną ramkę i wartości („not
+     detected", „no data", „26 of 67") wisiały za jej prawą krawędzią. Teraz
+     kolumna może być węższa od zawartości, a tekst łamie się w wierszu. */
+  .float-card.tape-card dl{margin:0;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.3rem .7rem;font-size:.74rem}
+  .float-card.tape-card dl>div{display:flex;justify-content:space-between;gap:.4rem;min-width:0;
     border-bottom:1px dotted var(--rule);padding-bottom:.2rem}
-  .float-card.tape-card dt{color:var(--ink-soft)}
-  .float-card.tape-card dd{margin:0;font-variant-numeric:tabular-nums}
+  .float-card.tape-card dt{color:var(--ink-soft);min-width:0}
+  /* Wartość nie kurczy się w wierszu (`flex:none`): zawija się etykieta obok niej
+     („Market / cap"), a nie liczba („$286 / M"). `max-width` + `break-word` łamią
+     dopiero wartość dłuższą niż cały wiersz, żeby i taka nie wisiała za kartą. */
+  .float-card.tape-card dd{margin:0;font-variant-numeric:tabular-nums;flex:none;max-width:100%;
+    text-align:right;overflow-wrap:break-word}
   .float-card.tape-card dl>div.wide{grid-column:1/-1}
   .float-card.tape-card dd.flag-detected{color:var(--gold)}
   .float-card.tape-card .scan-head{border-bottom:none;padding-bottom:0;margin-top:.15rem}
@@ -399,6 +410,13 @@
       flex-direction:row;flex-wrap:wrap}
     .side-stack.left,.side-stack.right{align-items:stretch}
     .float-card{max-width:calc(50% - .4rem)}
+  }
+  @media (max-width:40rem){
+    /* Telefon: dwie karty po 50% miałyby ~180px, a wiersz „Owner can edit
+       balances / not detected" potrzebuje ok. 250px. Każda karta dostaje całą
+       szerokość ekranu (kolumna wyżej już je układa jedna pod drugą). Stoi po
+       bloku 56rem, żeby go nadpisać kolejnością. */
+    .float-card{max-width:100%}
   }
 
   /* ---------- panel sędziego: kwestie + werdykt, na dole środkiem ---------- */
@@ -696,4 +714,23 @@
 
   @media (prefers-reduced-motion:reduce){
     .banner-sway{animation:none}
+  }
+
+  /* ---------- linijka „na czym stoi projekt" ---------- */
+  /* Element siatki `.cage` w lewym górnym rogu (kolumna 1, wiersz 1), nad
+     kartami narożnika: karty zaczynają się 4,5rem od góry, a linijka mieści się
+     w dwóch wierszach drobnego pixelowego fontu, więc nic na siebie nie nachodzi.
+     Przygaszona i bez zdarzeń wskaźnika. Segmenty nie łamią się w środku
+     (`nowrap`); `&nbsp;` przed kropką trzyma ją przy poprzednim segmencie, żeby
+     zawinięta linia nie zaczynała się od „·". */
+  .stack-line{grid-column:1;grid-row:1;align-self:start;justify-self:start;z-index:20;
+    margin:.1rem 0 0;max-width:100%;pointer-events:none;
+    font-family:var(--font-pixel),monospace;font-size:.5rem;line-height:1.9;letter-spacing:.02em;
+    color:var(--ink-soft);opacity:.62}
+  .stack-line span{white-space:nowrap}
+  @media (max-width:56rem){
+    /* Jedna kolumna: linijka jest ostatnia, na dole przewijanego ekranu. Węższa
+       o zakładkę „RANKING" przy prawej krawędzi, żeby zawinęła się przed nią. */
+    .stack-line{order:5;align-self:center;text-align:center;margin:.25rem 0 .5rem;
+      max-width:calc(100% - 3.5rem)}
   }

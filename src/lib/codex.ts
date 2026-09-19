@@ -16,6 +16,8 @@ import {
 import {
   computeChartModifiers,
   computeStats,
+  computeSurvivalBonus,
+  computeVelocity,
   computeVulnerability,
   latestClose,
   sortPairsByLiquidity,
@@ -139,6 +141,19 @@ export interface TokenFightData {
    * liczyła jej drugi raz z surowych liczb.
    */
   vulnerability: number
+  /**
+   * Rotacja płynności (velocity): obrót 24h / płynność. Surowa liczba bez
+   * sufitu — szybkość liczy się z niej obciętej, ale do UI i snapshotu idzie
+   * pełna wartość, żeby widać było, ile to naprawdę wynosi.
+   */
+  velocity: number
+  /**
+   * Bonus do puli życia za przetrwanie. 0–0.1 (0% do 10%). Wiek pary daje
+   * premię starszym tokenom: większość umiera w pierwszych tygodniach, więc
+   * przetrwanie miesiąca to sygnał jakości. Liczone tu raz i niesione obok
+   * statystyk, żeby symulacja nie liczyła tego drugi raz.
+   */
+  survivalBonus: number
   /** Bramka na liczbie holderów — działa na darmowym planie, w przeciwieństwie do koncentracji. */
   holderGate: HolderGate
   /** Bramka na honeypocie ze skanu GoPlus. Brak skanu przepuszcza; patrz `security.ts`. */
@@ -599,6 +614,8 @@ export async function fetchTokenFightData(
       ageDays: snapshot.pairAgeDays,
     }),
     vulnerability: computeVulnerability(snapshot),
+    velocity: computeVelocity(snapshot.volume24hUsd, snapshot.liquidityUsd),
+    survivalBonus: computeSurvivalBonus(snapshot.pairAgeDays),
     holderGate: holderGate(snapshot.holders),
     honeypotGate: honeypotGate(snapshot.security),
     weightClass: weightClass(snapshot.marketCapUsd),

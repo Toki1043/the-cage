@@ -242,6 +242,7 @@ function fighter(address: string, symbol: string, raw = HEALTHY, security: Contr
     stats: computeStats(raw),
     modifiers,
     vulnerability: computeVulnerability(raw),
+    survivalBonus: 0,
     holderGate: holderGate(raw.holders),
     honeypotGate: honeypotGate(security),
     concentration: concentrationVerdict(concentrationUnavailable(null, 'test')),

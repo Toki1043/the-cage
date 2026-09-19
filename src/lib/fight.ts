@@ -33,6 +33,12 @@ export interface FighterInput {
    */
   vulnerability: number
   /**
+   * Bonus do puli życia za przetrwanie. 0–0.1 (0% do 10%). Wiek pary daje
+   * premię starszym tokenom: większość umiera w pierwszych tygodniach, więc
+   * przetrwanie miesiąca to sygnał jakości. Świeżość nie jest premią.
+   */
+  survivalBonus: number
+  /**
    * Bramka na liczbie holderów. Nie przeszła — walkower, bez względu na
    * statystyki. Działa na darmowym planie Codexu.
    */
@@ -332,6 +338,7 @@ export function combatProfile(fighter: FighterInput): CombatProfile {
 
   const hpStart =
     (BALANCE.hpBase + wytrzymalosc) *
+    (1 + fighter.survivalBonus) *
     (1 - BALANCE.drawdownHpPenalty * drawdown) *
     (1 - BALANCE.concentrationHpPenalty * concentrationPenalty) *
     (1 - BALANCE.vulnerabilityHpPenalty * vulnerability)

@@ -46,6 +46,7 @@ function token(
     networkId: 4663,
     stats: computeStats(raw),
     vulnerability: computeVulnerability(raw),
+    survivalBonus: 0,
     holderGate: holderGate(raw.holders),
     honeypotGate: honeypotGate(securityUnavailable(4663, 'test')),
     weightClass: weightClass(raw.marketCapUsd),

@@ -35,6 +35,9 @@ console.log('\n== Kontrola z CLAUDE.md: token AI (Artificial Inu) ==')
 // Kontrola sprawdza implementację wzorów przy podanych wejściach. Wcześniej
 // siła wychodziła tu 70 — tyle wynosi teraz podatność, ten sam wzór o innej roli.
 //
+// Szybkość była 39 przy starej formule (z wieku 56 dni). Nowa formuła liczy
+// z rotacji: 1M / 2.13M = 0.47x → min(0.47, 15) / 15 * 100 = 3.
+//
 // Te wejścia opisują jedną konkretną parę AI: tę z WETH, utworzoną 22.07.2026.
 // Od kiedy parę referencyjną wybieramy deterministycznie po największej
 // płynności, dla AI wygrywa para z NVDA ($3,6M, 14.07.2026), więc żywe API daje
@@ -48,7 +51,7 @@ const aiRaw = {
   ageDays: 56,
 }
 const ai = computeStats(aiRaw)
-check('statystyki AI', ai, { wytrzymalosc: 67, sila: 60, garda: 73, szybkosc: 39 })
+check('statystyki AI', ai, { wytrzymalosc: 67, sila: 60, garda: 73, szybkosc: 3 })
 check('podatność AI (dawna „siła" 70)', computeVulnerability(aiRaw), 70)
 
 console.log('\n== Punkty kotwiczące skali ==')
@@ -59,8 +62,11 @@ check('obrót 24h $100M → siła 100', stats({ volume24hUsd: 100_000_000 }).sil
 check('obrót 24h $1M → siła 60', stats({ volume24hUsd: 1_000_000 }).sila, 60)
 check('10 holderów → garda 0', stats({ holders: 10 }).garda, 0)
 check('1M holderów → garda 100', stats({ holders: 1_000_000 }).garda, 100)
-check('0 dni → szybkość 100', stats({ ageDays: 0 }).szybkosc, 100)
-check('730 dni → szybkość 0', stats({ ageDays: 730 }).szybkosc, 0)
+// Szybkość teraz z rotacji (volume/liquidity), nie z wieku: 1x → 7, 15x → 100, sufit przy 15x
+check('rotacja 1x → szybkość 7', stats({ volume24hUsd: 1_000, liquidityUsd: 1_000 }).szybkosc, 7)
+check('rotacja 15x → szybkość 100', stats({ volume24hUsd: 15_000, liquidityUsd: 1_000 }).szybkosc, 100)
+check('rotacja 0x → szybkość 0', stats({ volume24hUsd: 0, liquidityUsd: 1_000 }).szybkosc, 0)
+check('rotacja 30x → szybkość 100 (sufit)', stats({ volume24hUsd: 30_000, liquidityUsd: 1_000 }).szybkosc, 100)
 
 console.log('\n== Siła nie zależy od kapitalizacji ani od płynności ==')
 // Regresja: siła liczona jako kapitalizacja / płynność dawała maksimum tokenowi
@@ -82,15 +88,17 @@ check('rośnie z kapitalizacją', vuln(1e6, 1e8) > vuln(1e6, 1e7), true)
 check('maleje z płynnością', vuln(1e7, 1e8) < vuln(1e6, 1e8), true)
 
 console.log('\n== Obcięcie do 0–100 ==')
+// Rotacja 1/1 = 1x (nie 0), więc szybkosc: 7, nie 0 — ageDays już nie wpływa.
 const below = computeStats({ liquidityUsd: 1, marketCapUsd: 1, volume24hUsd: 1, holders: 1, ageDays: 5_000 })
-check('poniżej skali nie schodzi pod 0', below, { wytrzymalosc: 0, sila: 0, garda: 0, szybkosc: 0 })
+check('poniżej skali nie schodzi pod 0', below, { wytrzymalosc: 0, sila: 0, garda: 0, szybkosc: 7 })
+// Rotacja 1e12 / 1e12 = 1x (nie ponad sufit 15x), więc szybkosc: 7, nie 100.
 const above = computeStats({ liquidityUsd: 1e12, marketCapUsd: 1e18, volume24hUsd: 1e12, holders: 1e9, ageDays: 0 })
-check('powyżej skali nie przekracza 100', above, { wytrzymalosc: 100, sila: 100, garda: 100, szybkosc: 100 })
-// Zerowa płynność daje log10(0) = -Infinity, a 0/0 daje NaN. Jedno i drugie
-// musi siadać na 0, nie przeciekać jako NaN. Szybkość 100 jest tu poprawna:
-// wiek 0 dni to udokumentowana kotwica skali, nie artefakt.
+check('powyżej skali nie przekracza 100', above, { wytrzymalosc: 100, sila: 100, garda: 100, szybkosc: 7 })
+// volume24h: 0, liquidity: 0 → rotacja 0/0 = NaN, clampStat daje 0. Zerowa
+// płynność daje też log10(0) = -Infinity na wytrzymałości i sile, a to tez
+// clampuje do 0. Nic nie przecieka jako NaN.
 const degenerate = computeStats({ liquidityUsd: 0, marketCapUsd: 0, volume24hUsd: 0, holders: 0, ageDays: 0 })
-check('zera nie produkują NaN', degenerate, { wytrzymalosc: 0, sila: 0, garda: 0, szybkosc: 100 })
+check('zera nie produkują NaN', degenerate, { wytrzymalosc: 0, sila: 0, garda: 0, szybkosc: 0 })
 check('nic nie jest NaN', Object.values(degenerate).some(Number.isNaN), false)
 
 console.log('\n== Statystyki nie zależą od przeciwnika ==')

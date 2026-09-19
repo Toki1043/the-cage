@@ -55,6 +55,7 @@ function token(address: string, symbol: string, raw: Raw): FighterInput {
     stats: computeStats(raw),
     modifiers,
     vulnerability: computeVulnerability(raw),
+    survivalBonus: 0,
     holderGate: holderGate(raw.holders),
     honeypotGate: honeypotGate(securityUnavailable(4663, 'test')),
     // Brak sald: pasmo `clear`, `enforced: false` — dzisiejsza odpowiedź na darmowym planie.

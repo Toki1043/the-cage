@@ -73,6 +73,14 @@ function multiple(marketCapUsd: number, liquidityUsd: number): string {
   return `${m >= 100 ? int(m) : m.toFixed(1)}×`
 }
 
+/**
+ * Rotacja płynności (velocity): obrót 24h ÷ płynność. Sformatowane jako "X.Xx"
+ * z suffixem turnover, np. "0.5× turnover" albo "33× turnover".
+ */
+function turnover(velocity: number): string {
+  return velocity >= 100 ? `${int(velocity)}× turnover` : `${velocity.toFixed(1)}× turnover`
+}
+
 /** Sekundy albo milisekundy — snapshot bywa zapisany i tak, i tak. */
 function utc(stamp: number): string {
   const d = new Date(stamp > 1e12 ? stamp : stamp * 1000)
@@ -276,8 +284,8 @@ export function explainFight(input: WhyInput): Why {
     },
     {
       id: 'speed',
-      label: 'Speed ← pair age',
-      ...both((t) => ({ score: t.stats.szybkosc, raw: days(t.snapshot.pairAgeDays) })),
+      label: 'Speed ← turnover',
+      ...both((t) => ({ score: t.stats.szybkosc, raw: turnover(t.velocity) })),
     },
     {
       id: 'vulnerability',
