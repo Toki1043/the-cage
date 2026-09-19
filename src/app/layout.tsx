@@ -22,9 +22,9 @@ const archivo = Archivo({
 })
 
 export const metadata: Metadata = {
-  title: 'Tale of the Tape — two contracts, one fight',
+  title: 'The Cage — contract fight',
   description:
-    'Two contracts, four stats each, three rounds. The numbers decide who wins — the commentary team just has to watch it happen.',
+    'Paste two token addresses and watch them fight. Stats from the chain, result from math, commentary from AI. Three rounds, one ring.',
 }
 
 export default function RootLayout({ children }: LayoutProps<'/'>) {
