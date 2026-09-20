@@ -62,8 +62,21 @@ kilkunastu tysięcy do setek milionów). Każdy wynik obetnij do przedziału 0�
 wytrzymałość = (log10(płynnośćUSD) - 3) / 5 * 100          // $1k → 0, $100M → 100
 siła         = (log10(obrót24hUSD) - 3) / 5 * 100          // $1k → 0, $100M → 100
 garda        = (log10(holderzy) - 1) / 5 * 100              // 10 → 0, 1M → 100
-szybkość     = 100 - (log10(dni + 1) / log10(731)) * 100    // dziś → 100, 2 lata → 0
+szybkość     = min(100, (log10(rotacja) + 1) / 2 * 100) * tłumienie
+                                                            // rotacja = obrót24h / płynność
+                                                            // 0,1× → 0, 1× → 50, 10× → 100
 ```
+
+Szybkość bierze się z **rotacji płynności** (obrót 24h ÷ płynność), nie z wieku pary,
+i ma skalę logarytmiczną: 0,5× daje 35 punktów, 2,6× daje 71. Kiedyś była liniowa
+(1× → 0, 15× → 100) i dawała 3 punkty przy 0,5×, więc prawie każdy token siedział przy zerze.
+Sufit (10× i więcej → 100) działa **przed** tłumieniem, nie po nim.
+
+**Tłumienie przy cienkiej płynności.** Rotacja przy płynności poniżej $200k jest podejrzana,
+nie imponująca: kilka transakcji na małej puli robi 10× bez realnej aktywności. Dlatego
+szybkość mnoży się przez `tłumienie(płynność)`: 1 od $200k w górę, 0,25 przy $1k i mniej,
+pomiędzy liniowo po logarytmie płynności (ciągle, bez skoku na progu). To zniżka, nie
+dyskwalifikacja: 10× na $20k daje 67, na $1k daje 25. Kod: `liquidityDamping` w `src/lib/stats.ts`.
 
 Siła bierze się z **obrotu 24h** pary referencyjnej, nie z kapitalizacji ani płynności.
 Kiedyś była to kapitalizacja / płynność — to miara ryzyka, nie siły: token bez płynności
@@ -71,7 +84,8 @@ dostawał maksimum i wygrywał ze zdrowym. Ten stosunek żyje teraz jako podatno
 
 Kontrola poprawności — token AI (Artificial Inu), płynność $2,13M, obrót 24h $1 mln
 (liczba wzorcowa, nie pomiar), kapitalizacja $273,4M, 46 755 holderów, 56 dni:
-wytrzymałość 67, siła 60, garda 73, szybkość 39, podatność 70.
+wytrzymałość 67, siła 60, garda 73, szybkość 34 (rotacja 0,47×, płynność powyżej $200k,
+więc bez tłumienia), podatność 70.
 
 Jeśli przeliczenie daje inne liczby, wzór został źle zaimplementowany.
 
@@ -185,7 +199,8 @@ Stała tabela po walce, do następnej walki. Domyślnie zwinięta do paska nagł
 arytmetyka i szablony w `src/lib/why.ts`, bez udziału modelu.
 
 - Każda statystyka obok surowej liczby, z której powstała: wytrzymałość ← płynność,
-  siła ← obrót 24h, garda ← holderzy, szybkość ← wiek pary, podatność ← kapitalizacja
+  siła ← obrót 24h, garda ← holderzy, szybkość ← rotacja (obrót 24h ÷ płynność, a przy
+  cienkiej płynności z jawnym mnożnikiem tłumienia), podatność ← kapitalizacja
   ÷ płynność jako krotność. Do tego obserwowane portfele i wynik skanu GoPlus.
 - Jedno zdanie liczone z tych liczb: przy walce największa przewaga i największy deficyt
   zwycięzcy, przy walkowerze powód z zapisanego zdarzenia badań. Zdanie mówi wprost, że

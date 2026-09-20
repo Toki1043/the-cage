@@ -8,6 +8,7 @@ import {
   computeStats,
   computeVulnerability,
   latestClose,
+  liquidityDamping,
   matchup,
   sortPairsByLiquidity,
   weightClass,
@@ -35,8 +36,10 @@ console.log('\n== Kontrola z CLAUDE.md: token AI (Artificial Inu) ==')
 // Kontrola sprawdza implementację wzorów przy podanych wejściach. Wcześniej
 // siła wychodziła tu 70 — tyle wynosi teraz podatność, ten sam wzór o innej roli.
 //
-// Szybkość była 39 przy starej formule (z wieku 56 dni). Nowa formuła liczy
-// z rotacji: 1M / 2.13M = 0.47x → min(0.47, 15) / 15 * 100 = 3.
+// Szybkość była 39 przy formule z wieku (56 dni), potem 3 przy liniowej skali
+// rotacji (0.47 / 15 * 100). Teraz skala jest logarytmiczna, 0,1x → 0 i 10x → 100:
+// 1M / 2.13M = 0.47x → (log10(0.47) + 1) / 2 * 100 = 34. Płynność $2,13M jest
+// powyżej $200k, więc bez tłumienia.
 //
 // Te wejścia opisują jedną konkretną parę AI: tę z WETH, utworzoną 22.07.2026.
 // Od kiedy parę referencyjną wybieramy deterministycznie po największej
@@ -51,7 +54,7 @@ const aiRaw = {
   ageDays: 56,
 }
 const ai = computeStats(aiRaw)
-check('statystyki AI', ai, { wytrzymalosc: 67, sila: 60, garda: 73, szybkosc: 3 })
+check('statystyki AI', ai, { wytrzymalosc: 67, sila: 60, garda: 73, szybkosc: 34 })
 check('podatność AI (dawna „siła" 70)', computeVulnerability(aiRaw), 70)
 
 console.log('\n== Punkty kotwiczące skali ==')
@@ -62,11 +65,27 @@ check('obrót 24h $100M → siła 100', stats({ volume24hUsd: 100_000_000 }).sil
 check('obrót 24h $1M → siła 60', stats({ volume24hUsd: 1_000_000 }).sila, 60)
 check('10 holderów → garda 0', stats({ holders: 10 }).garda, 0)
 check('1M holderów → garda 100', stats({ holders: 1_000_000 }).garda, 100)
-// Szybkość teraz z rotacji (volume/liquidity), nie z wieku: 1x → 7, 15x → 100, sufit przy 15x
-check('rotacja 1x → szybkość 7', stats({ volume24hUsd: 1_000, liquidityUsd: 1_000 }).szybkosc, 7)
-check('rotacja 15x → szybkość 100', stats({ volume24hUsd: 15_000, liquidityUsd: 1_000 }).szybkosc, 100)
-check('rotacja 0x → szybkość 0', stats({ volume24hUsd: 0, liquidityUsd: 1_000 }).szybkosc, 0)
-check('rotacja 30x → szybkość 100 (sufit)', stats({ volume24hUsd: 30_000, liquidityUsd: 1_000 }).szybkosc, 100)
+// Szybkość z rotacji (volume/liquidity) na skali logarytmicznej: 0,1x → 0,
+// 10x → 100. Kotwice liczone przy płynności $1M, czyli bez tłumienia; tłumienie
+// przy cienkiej płynności ma własną sekcję niżej.
+const speed = (velocity: number, liquidityUsd = 1_000_000) =>
+  stats({ volume24hUsd: velocity * liquidityUsd, liquidityUsd }).szybkosc
+check('rotacja 0,1x → szybkość 0', speed(0.1), 0)
+check('rotacja 10x → szybkość 100', speed(10), 100)
+check('rotacja 1x → szybkość 50', speed(1), 50)
+check('rotacja 0,5x → szybkość 35', speed(0.5), 35)
+check('rotacja 2,6x → szybkość 71', speed(2.6), 71)
+check('rotacja 0x → szybkość 0', speed(0), 0)
+check('rotacja 0,05x (pod skalą) → szybkość 0, nie ujemna', speed(0.05), 0)
+check('rotacja 30x → szybkość 100 (sufit)', speed(30), 100)
+// Regresja: skala liniowa (1x → 0, 15x → 100) dawała 3 punkty przy 0,5x i 17 przy
+// 2,6x, więc prawie cała populacja siedziała przy zerze. Rotacja 0,5x ma dawać
+// 30–40 punktów, a różnica między 0,5x i 2,6x ma być rzędu innych statystyk.
+check('rotacja 0,5x mieści się w 30–40 punktach', speed(0.5) >= 30 && speed(0.5) <= 40, true)
+check('0,5x → 2,6x to co najmniej 30 punktów różnicy', speed(2.6) - speed(0.5) >= 30, true)
+// Skala logarytmiczna: ten sam stosunek to ta sama liczba punktów.
+check('dekada 0,1x → 1x = dekada 1x → 10x', speed(1) - speed(0.1), speed(10) - speed(1))
+check('szybkość rośnie z rotacją', speed(0.3) < speed(1) && speed(1) < speed(3), true)
 
 console.log('\n== Siła nie zależy od kapitalizacji ani od płynności ==')
 // Regresja: siła liczona jako kapitalizacja / płynność dawała maksimum tokenowi
@@ -87,14 +106,55 @@ check('brak obu liczb → 0, nie NaN', vuln(0, 0), 0)
 check('rośnie z kapitalizacją', vuln(1e6, 1e8) > vuln(1e6, 1e7), true)
 check('maleje z płynnością', vuln(1e7, 1e8) < vuln(1e6, 1e8), true)
 
+console.log('\n== Szybkość: tłumienie przy cienkiej płynności ==')
+// Rotacja przy płynności poniżej $200k jest podejrzana, nie imponująca: kilka
+// transakcji na małej puli robi 10x bez realnej aktywności.
+check('płynność $200k → mnożnik 1', liquidityDamping(200_000), 1)
+check('płynność $5M → mnożnik 1', liquidityDamping(5_000_000), 1)
+check('płynność $1k → dolna granica 0,25', liquidityDamping(1_000), 0.25)
+check('płynność poniżej $1k → dolna granica 0,25', liquidityDamping(100), 0.25)
+check('zerowa płynność → dolna granica, nie NaN', liquidityDamping(0), 0.25)
+check('ujemna płynność → dolna granica, nie NaN', liquidityDamping(-5), 0.25)
+check('brak płynności (NaN) → dolna granica, nie NaN', liquidityDamping(Number.NaN), 0.25)
+// Ciągłość: skok na progu dawałby token z $199k i $201k na dwóch końcach skali.
+check('tuż pod progiem mnożnik prawie 1', liquidityDamping(199_999) > 0.9999, true)
+check('$20k → mnożnik 0,67', Math.round(liquidityDamping(20_000) * 100) / 100, 0.67)
+let monotone = true
+let prev = 0
+for (let liq = 500; liq <= 1_000_000; liq *= 1.15) {
+  const m = liquidityDamping(liq)
+  if (m < prev) monotone = false
+  prev = m
+}
+check('mnożnik nie maleje wraz z płynnością', monotone, true)
+check('mnożnik nigdy poniżej 0,25 ani powyżej 1', [500, 5_000, 50_000, 500_000].every((l) => liquidityDamping(l) >= 0.25 && liquidityDamping(l) <= 1), true)
+
+check('rotacja 10x, płynność $200k → 100', speed(10, 200_000), 100)
+check('rotacja 10x, płynność $100k → 90', speed(10, 100_000), 90)
+check('rotacja 10x, płynność $20k → 67', speed(10, 20_000), 67)
+check('rotacja 10x, płynność $1k → 25', speed(10, 1_000), 25)
+// Sufit działa przed mnożnikiem. Obcięcie po nim pozwalałoby rotacji 33x na $50k
+// wrócić do 100, czyli dawałoby cienkiej płynności pełną premię.
+check('rotacja 33x na $50k nie wraca do 100', speed(33, 50_000), speed(10, 50_000))
+check('rotacja 33x na $50k = 80', speed(33, 50_000), 80)
+check('ta sama wysoka rotacja: cienki rynek poniżej zdrowego', speed(10, 30_000) < speed(10, 2_000_000), true)
+check('cienka płynność to zniżka, nie zero', speed(10, 1_000) > 0, true)
+check('zerowa rotacja na cienkim rynku dalej 0', speed(0, 5_000), 0)
+check('zerowa płynność nie produkuje NaN', stats({ liquidityUsd: 0, volume24hUsd: 1e6 }).szybkosc, 0)
+// Tłumienie dotyczy tylko szybkości: pozostałe statystyki liczą się jak dawniej.
+const thin = stats({ liquidityUsd: 20_000, volume24hUsd: 200_000, holders: 500 })
+const healthy = stats({ liquidityUsd: 20_000_000, volume24hUsd: 200_000, holders: 500 })
+check('tłumienie nie rusza siły ani gardy', [thin.sila, thin.garda], [healthy.sila, healthy.garda])
+
 console.log('\n== Obcięcie do 0–100 ==')
-// Rotacja 1/1 = 1x (nie 0), więc szybkosc: 7, nie 0 — ageDays już nie wpływa.
+// Rotacja 1/1 = 1x → 50 punktów na skali, ale płynność $1 to skrajnie cienki rynek
+// (mnożnik 0,25), więc 12,5 zaokrąglone do 13 — ageDays już nie wpływa.
 const below = computeStats({ liquidityUsd: 1, marketCapUsd: 1, volume24hUsd: 1, holders: 1, ageDays: 5_000 })
-check('poniżej skali nie schodzi pod 0', below, { wytrzymalosc: 0, sila: 0, garda: 0, szybkosc: 7 })
-// Rotacja 1e12 / 1e12 = 1x (nie ponad sufit 15x), więc szybkosc: 7, nie 100.
+check('poniżej skali nie schodzi pod 0', below, { wytrzymalosc: 0, sila: 0, garda: 0, szybkosc: 13 })
+// Rotacja 1e12 / 1e12 = 1x (nie ponad sufit 10x), płynność bez tłumienia: 50.
 const above = computeStats({ liquidityUsd: 1e12, marketCapUsd: 1e18, volume24hUsd: 1e12, holders: 1e9, ageDays: 0 })
-check('powyżej skali nie przekracza 100', above, { wytrzymalosc: 100, sila: 100, garda: 100, szybkosc: 7 })
-// volume24h: 0, liquidity: 0 → rotacja 0/0 = NaN, clampStat daje 0. Zerowa
+check('powyżej skali nie przekracza 100', above, { wytrzymalosc: 100, sila: 100, garda: 100, szybkosc: 50 })
+// volume24h: 0, liquidity: 0 → rotacja 0 (dzielenie chronione), log10(0) = -Infinity, clampStat daje 0. Zerowa
 // płynność daje też log10(0) = -Infinity na wytrzymałości i sile, a to tez
 // clampuje do 0. Nic nie przecieka jako NaN.
 const degenerate = computeStats({ liquidityUsd: 0, marketCapUsd: 0, volume24hUsd: 0, holders: 0, ageDays: 0 })

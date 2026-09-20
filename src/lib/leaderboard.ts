@@ -34,8 +34,12 @@ import { getJson, isPersistent, mgetJson, setIfAbsent, setJson, zadd, zcard, zre
  * podatność i bramka na holderach. Walki z v1 były policzone inną regułą,
  * a klucz walki jest idempotentny po parze adresów — bez nowej wersji ta sama
  * para nie mogłaby zostać rozegrana ponownie, a ranking mieszałby dwie skale.
+ *
+ * v3: szybkość z rotacji płynności na skali logarytmicznej (0,1x → 0, 10x → 100)
+ * i z tłumieniem przy płynności poniżej $200k, zamiast skali liniowej (1x → 0,
+ * 15x → 100). Ta sama zasada: wpisy z v2 mają szybkość na innej skali.
  */
-const V = 'v2'
+const V = 'v3'
 
 /** Klucz walki. `seedKey` jest funkcją obu adresów, więc ta sama para = ten sam klucz. */
 const fightKey = (seedKey: string) => `fight:${V}:${seedKey}`

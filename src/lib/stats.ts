@@ -39,14 +39,32 @@ export const STAT_SCALE = {
   /** 10 holderów → 0, 1M → 100 */
   garda: { minLog: 1, decades: 5 },
   /**
-   * Rotacja płynności (velocity): 1x → 0, 15x → 100, powyżej 15x sufit.
+   * Rotacja płynności (velocity): 0,1x → 0, 10x → 100, skala logarytmiczna,
+   * powyżej 10x sufit. Wtedy 0,5x daje 35 punktów, 1x daje 50, a 2,6x daje 71.
    *
    * Obrót 24h / płynność pokazuje, ile razy dziennie płynność "obraca się".
-   * Wysoka rotacja = aktywny token = wysokie tempo w ringu. Sufit przy 15x:
-   * przewaga z rotacji ma górną granicę — token z 33x nie dostaje dwa razy
-   * więcej niż token z 16x. Bez kary, po prostu bez dalszej premii.
+   * Wysoka rotacja = aktywny token = wysokie tempo w ringu. Rotacja chodzi
+   * w rzędach wielkości, jak płynność i obrót, więc skala też jest
+   * logarytmiczna. Liniowa (dawne 1x → 0, 15x → 100) dawała 3 punkty przy 0,5x
+   * i 17 przy 2,6x: prawie cała populacja lądowała przy zerze, a szybkość
+   * prawie nie różnicowała zawodników. Dwie dekady na całą skalę (50 punktów na
+   * dekadę) są szersze niż u pozostałych statystyk (20 na dekadę), bo rotacja
+   * ma znacznie węższy zakres niż płynność: prawie każdy token mieści się
+   * między 0,1x a 10x. Sufit przy 10x: token z 33x nie dostaje więcej niż z 10x.
    */
-  szybkosc: { ceiling: 15 },
+  szybkosc: { minVelocity: 0.1, decades: 2 },
+  /**
+   * Tłumienie szybkości przy cienkiej płynności: poniżej $200k wysoka rotacja
+   * jest podejrzana, nie imponująca. Kilka transakcji na małej puli robi
+   * rotację 10x bez żadnej realnej aktywności, więc taki token nie dostaje
+   * pełnej premii.
+   *
+   * Mnożnik ciągły, nie próg: $200k i więcej → 1, $1k i mniej → `minDamping`,
+   * pomiędzy liniowo po logarytmie płynności. Skok na progu dawałby token
+   * z $199k i $201k na dwóch końcach skali. Sam mnożnik nie zeruje szybkości:
+   * cienka płynność to zniżka, nie dyskwalifikacja.
+   */
+  thinLiquidity: { thresholdUsd: 200_000, floorUsd: 1_000, minDamping: 0.25 },
   /**
    * Survival bonus: wiek pary → bonus do puli życia.
    *
@@ -80,7 +98,8 @@ export function clampStat(value: number): number {
  *  - wytrzymałość: 67 (bez zmiany)
  *  - siła: 60 (bez zmiany)
  *  - garda: 73 (bez zmiany)
- *  - szybkość: 30 (było 39; nowa formuła z rotacji 0.47x)
+ *  - szybkość: 34 (rotacja 0,47x na skali logarytmicznej; płynność powyżej
+ *    $200k, więc bez tłumienia)
  */
 export function computeStats(raw: RawTokenNumbers): FightStats {
   const { liquidityUsd, volume24hUsd, holders } = raw
@@ -102,12 +121,18 @@ export function computeStats(raw: RawTokenNumbers): FightStats {
   const garda =
     ((Math.log10(holders) - STAT_SCALE.garda.minLog) / STAT_SCALE.garda.decades) * 100
 
-  // Szybkość: rotacja płynności (velocity). Obrót 24h / płynność pokazuje,
-  // ile razy dziennie płynność "obraca się". Wysoka rotacja = aktywny token
-  // = wysokie tempo w ringu. Sufit przy 15x: przewaga z rotacji ma górną
-  // granicę, więc token z 33x nie dostaje dwa razy więcej niż token z 16x.
-  const velocity = liquidityUsd > 0 ? volume24hUsd / liquidityUsd : 0
-  const szybkosc = (Math.min(velocity, STAT_SCALE.szybkosc.ceiling) / STAT_SCALE.szybkosc.ceiling) * 100
+  // Szybkość: rotacja płynności (velocity), na skali logarytmicznej, potem
+  // stłumiona przy cienkiej płynności. Zerowa rotacja daje log10(0) = -Infinity,
+  // które `clampStat` sprowadza do 0. Sufit 100 (rotacja 10x i więcej) działa
+  // PRZED mnożnikiem: obcięcie po nim pozwalałoby rotacji 33x na $50k dojść
+  // z powrotem do 100, czyli dawałoby cienkiej płynności pełną premię.
+  const { minVelocity, decades } = STAT_SCALE.szybkosc
+  const velocity = computeVelocity(volume24hUsd, liquidityUsd)
+  const velocityScore = Math.min(
+    100,
+    ((Math.log10(velocity) - Math.log10(minVelocity)) / decades) * 100,
+  )
+  const szybkosc = velocityScore * liquidityDamping(liquidityUsd)
 
   return {
     wytrzymalosc: clampStat(wytrzymalosc),
@@ -138,11 +163,29 @@ export function computeSurvivalBonus(ageDays: number): number {
  *
  * Pokazuje, ile razy dziennie płynność "obraca się". Wysoka rotacja = aktywny
  * token. Ta sama liczba, z której liczy się szybkość — może wyjść poza sufit
- * 15x, ale do statystyki wchodzi już obcięta. Wracamy surową wartość do
+ * 10x, ale do statystyki wchodzi już obcięta. Wracamy surową wartość do
  * UI i snapshotu, żeby widać było, ile to naprawdę wynosi.
  */
 export function computeVelocity(volume24hUsd: number, liquidityUsd: number): number {
   return liquidityUsd > 0 ? volume24hUsd / liquidityUsd : 0
+}
+
+/**
+ * Mnożnik szybkości przy cienkiej płynności, 0,25–1. Patrz `STAT_SCALE.thinLiquidity`.
+ *
+ * Płynność od $200k w górę nie jest tłumiona (1). Poniżej mnożnik spada
+ * liniowo po logarytmie płynności do 0,25 przy $1k i mniej. Płynność zerowa,
+ * ujemna albo brakująca (`NaN`) dostaje dolną granicę: nie ma pod czym
+ * rotować, więc też nie ma czego premiować.
+ */
+export function liquidityDamping(liquidityUsd: number): number {
+  const { thresholdUsd, floorUsd, minDamping } = STAT_SCALE.thinLiquidity
+  if (liquidityUsd >= thresholdUsd) return 1
+  if (!(liquidityUsd > floorUsd)) return minDamping
+  const position =
+    (Math.log10(liquidityUsd) - Math.log10(floorUsd)) /
+    (Math.log10(thresholdUsd) - Math.log10(floorUsd))
+  return minDamping + (1 - minDamping) * position
 }
 
 /**

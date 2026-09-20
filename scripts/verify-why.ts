@@ -5,7 +5,7 @@
  * Panel ma jedną obietnicę: każda liczba w nim jest tą, z której powstała
  * statystyka, i nic w nim nie pochodzi z modelu. Test stoi więc na tym samym
  * mapowaniu co API (`computeStats`) i na liczbach kontrolnych z CLAUDE.md:
- * AI → wytrzymałość 67, siła 60, garda 73, szybkość 3 (z rotacji 0.47x), podatność 70.
+ * AI → wytrzymałość 67, siła 60, garda 73, szybkość 34 (z rotacji 0.47x, skala logarytmiczna), podatność 70.
  */
 import { simulateFight } from '../src/lib/fight.ts'
 import type { TokenFightData } from '../src/lib/codex.ts'
@@ -133,7 +133,7 @@ check('siedem wierszy w tej kolejności', why.rows.map((r) => r.id), ['stamina',
 check('wytrzymałość ← płynność: AI 67 z $2,130,000', [row('stamina').a.score, row('stamina').a.raw], [67, '$2,130,000'])
 check('siła ← obrót 24h: AI 60 z $1,000,000', [row('power').a.score, row('power').a.raw], [60, '$1,000,000'])
 check('garda ← holderzy: AI 73 z 46,755', [row('guard').a.score, row('guard').a.raw], [73, '46,755'])
-check('szybkość ← rotacja: AI 3 z 0.5× turnover', [row('speed').a.score, row('speed').a.raw], [3, '0.5× turnover'])
+check('szybkość ← rotacja: AI 34 z 0.5× turnover', [row('speed').a.score, row('speed').a.raw], [34, '0.5× turnover'])
 check('podatność ← kapitalizacja ÷ płynność: AI 70 z 128×', [row('vulnerability').a.score, row('vulnerability').a.raw], [70, '128×'])
 check('etykiety niosą źródło', why.rows.slice(0, 5).map((r) => r.label), [
   'Stamina ← liquidity',
@@ -160,6 +160,18 @@ check('rotacja niska formatowana z ułamkiem', explainFight(input(young, SOLID))
 const dry = token('0x4444444444444444444444444444444444444444', 'DRY', { ...SOLID_RAW, liquidityUsd: 0 })
 check('zerowa płynność: krotność mówi wprost, bez dzielenia przez zero', explainFight(input(dry, SOLID)).rows[4].a.raw, 'no liquidity')
 check('symbol z HTML-a jest czyszczony', explainFight(input(token('0x5555555555555555555555555555555555555555', '<img onerror=x>', SOLID_RAW), SOLID)).symbols.a, 'imgonerrorx')
+
+console.log('\n== Szybkość: tłumienie przy cienkiej płynności jest widoczne w tabeli ==')
+// Liczba w tabeli ma dać się odtworzyć z tego, co na ekranie. Przy cienkiej
+// płynności szybkość wychodzi niższa niż sama rotacja, więc tabela mówi, o ile.
+const THIN_RAW: Raw = { liquidityUsd: 20_000, marketCapUsd: 200_000, volume24hUsd: 200_000, holders: 3_100, ageDays: 30 }
+const THIN = token('0x6666666666666666666666666666666666666666', 'THIN', THIN_RAW)
+const thinSpeed = explainFight(input(THIN, SOLID)).rows[3]
+check('cienka płynność: wynik z tłumieniem', thinSpeed.a.score, computeStats(THIN_RAW).szybkosc)
+check('cienka płynność: 10x na $20k → 67', thinSpeed.a.score, 67)
+check('cienka płynność: tabela podaje mnożnik', thinSpeed.a.raw, '10.0× turnover, ×0.67 for thin liquidity')
+check('zdrowa płynność: bez notki o tłumieniu', thinSpeed.b.raw.includes('thin liquidity'), false)
+check('płynność równo $200k: bez notki', explainFight(input(token('0x7777777777777777777777777777777777777777', 'EDG', { ...THIN_RAW, liquidityUsd: 200_000, volume24hUsd: 2_000_000 }), SOLID)).rows[3].a.raw, '10.0× turnover')
 
 console.log('\n== Obserwowane portfele ==')
 const trackedOk: TrackedWallets = { configured: true, watched: 40, a: 3, b: null, note: null }

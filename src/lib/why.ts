@@ -13,6 +13,9 @@ import type { TokenFightData } from './codex'
 import type { FightResult, Side } from './fight'
 import type { SecurityChecks } from './security'
 import type { FightStats } from './stats'
+// Rozszerzenie `.ts` w imporcie wykonywanym w czasie działania: bez niego
+// `node --experimental-strip-types` (skrypty weryfikacyjne) nie rozwiąże ścieżki.
+import { liquidityDamping } from './stats.ts'
 import type { TrackedWallets } from './tracked'
 
 /** Wejście: podzbiór odpowiedzi `/api/fight`, tyle ile panel czyta. */
@@ -56,12 +59,6 @@ const safeSymbol = (symbol: string) => symbol.replace(/[^A-Za-z0-9._-]/g, '').sl
 const int = (n: number) => Math.round(n).toLocaleString('en-US')
 const dollars = (n: number) => (Number.isFinite(n) && n > 0 ? `$${int(n)}` : '$0')
 
-/** Wiek pary w dniach: ułamek tylko tam, gdzie pełne dni ukryłyby różnicę. */
-function days(n: number): string {
-  if (!Number.isFinite(n) || n < 0) return '—'
-  return n < 10 ? `${n.toFixed(1)} d` : `${int(n)} d`
-}
-
 /**
  * Kapitalizacja / płynność jako krotność. Zerowa płynność przy dodatniej
  * kapitalizacji daje sufit podatności (CLAUDE.md), więc pokazujemy to wprost,
@@ -79,6 +76,19 @@ function multiple(marketCapUsd: number, liquidityUsd: number): string {
  */
 function turnover(velocity: number): string {
   return velocity >= 100 ? `${int(velocity)}× turnover` : `${velocity.toFixed(1)}× turnover`
+}
+
+/**
+ * Surowa liczba za szybkością: rotacja, a przy cienkiej płynności także mnożnik,
+ * który ją tłumi. Bez tego tabela pokazywałaby „35 ← 0.5× turnover" obok
+ * liczby, która wyszła niższa, i nie dałoby się jej odtworzyć z tego, co na ekranie.
+ * Mnożnik ma dwa miejsca po przecinku, jak w `liquidityDamping`.
+ */
+function speedRaw(velocity: number, liquidityUsd: number): string {
+  const damping = liquidityDamping(liquidityUsd)
+  return damping < 1
+    ? `${turnover(velocity)}, ×${damping.toFixed(2)} for thin liquidity`
+    : turnover(velocity)
 }
 
 /** Sekundy albo milisekundy — snapshot bywa zapisany i tak, i tak. */
@@ -157,7 +167,7 @@ function edges(win: TokenFightData, lose: TokenFightData): Edge[] {
     stat('wytrzymalosc', 'stamina', (t) => dollars(t.snapshot.liquidityUsd), 'of liquidity'),
     stat('sila', 'power', (t) => dollars(t.snapshot.volume24hUsd), 'of 24h volume'),
     stat('garda', 'guard', (t) => int(t.snapshot.holders), 'holders'),
-    stat('szybkosc', 'speed', (t) => days(t.snapshot.pairAgeDays), ''),
+    stat('szybkosc', 'speed', (t) => speedRaw(t.velocity, t.snapshot.liquidityUsd), ''),
     {
       name: 'vulnerability',
       winner: win.vulnerability,
@@ -285,7 +295,10 @@ export function explainFight(input: WhyInput): Why {
     {
       id: 'speed',
       label: 'Speed ← turnover',
-      ...both((t) => ({ score: t.stats.szybkosc, raw: turnover(t.velocity) })),
+      ...both((t) => ({
+        score: t.stats.szybkosc,
+        raw: speedRaw(t.velocity, t.snapshot.liquidityUsd),
+      })),
     },
     {
       id: 'vulnerability',
