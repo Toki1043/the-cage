@@ -24,7 +24,8 @@
     "check:commentary": "node --env-file=.env.local --experimental-strip-types --no-warnings scripts/check-commentary.ts",
     "check:balance": "node --experimental-strip-types --no-warnings scripts/check-balance.ts",
     "verify:tracked": "node --experimental-strip-types --no-warnings scripts/verify-tracked.ts",
-    "check:tracked": "node --env-file=.env.local --experimental-strip-types --no-warnings scripts/check-tracked.ts"
+    "check:tracked": "node --env-file=.env.local --experimental-strip-types --no-warnings scripts/check-tracked.ts",
+    "generate:sfx": "node --env-file=.env.local --experimental-strip-types --no-warnings scripts/generate-sfx.ts"
   },
   "dependencies": {
     "next": "16.3.5",

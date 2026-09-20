@@ -257,6 +257,17 @@
   .fighter .stance{transition:transform .24s cubic-bezier(.2,.8,.3,1);transform-origin:60px 168px}
   .fighter.punch .stance{animation:lunge .48s cubic-bezier(.2,.8,.3,1)}
   @keyframes lunge{0%{transform:none}45%{transform:translateX(14px)}100%{transform:none}}
+  /* Obrona (`.brace`, dokładana obrońcy przy nieprzepuszczonym ciosie w
+     `throwPunch()`): krótkie odchylenie do tyłu, od przeciwnika, krokami zamiast
+     płynnie. Idzie po `.stance`, który u obrońcy jest wolny (wykrok animuje go
+     tylko atakującemu). Jednostki to jednostki viewBoxa. Odchylenie w tył to
+     przeciwny znak niż wykrok: czerwony (patrzy w prawo) w lewo i przeciwnie do
+     ruchu wskazówek, niebieski (patrzy w lewo) odwrotnie. Klasa wisi ~165 ms,
+     a animacja trwa 150. */
+  .fighter.a.brace .stance{animation:brace-a .15s steps(3,end)}
+  .fighter.b.brace .stance{animation:brace-b .15s steps(3,end)}
+  @keyframes brace-a{0%{transform:none}50%{transform:translateX(-3px) rotate(-4deg)}100%{transform:none}}
+  @keyframes brace-b{0%{transform:none}50%{transform:translateX(3px) rotate(4deg)}100%{transform:none}}
   .fighter .sway{transition:transform .6s ease-in-out;transform-origin:60px 168px}
   .fighter.low-hp .sway{animation:wobble 2.8s ease-in-out infinite}
   @keyframes wobble{0%,100%{transform:rotate(0)}25%{transform:rotate(-3deg)}75%{transform:rotate(3deg)}}
@@ -295,6 +306,24 @@
   @keyframes pop{0%{opacity:0;transform:translate(-50%,0) scale(.7)}
     25%{opacity:1;transform:translate(-50%,-16px) scale(1.15)}
     100%{opacity:0;transform:translate(-50%,-46px) scale(1)}}
+  /* Podpis obrony: pixelowy i identyczny po obu stronach. Ruch idzie krokami
+     (`steps()`), cień jest twardy, a krawędź kanciasta. Środek podpisu leży na
+     osi postaci, czyli tam, dokąd `.fighter.a/.b svg` przesuwa sylwetkę
+     (te same wyrażenia co wyżej), a nie na środku pola zawodnika. */
+  .pop.blocked{font-family:var(--font-pixel),monospace;font-size:.6rem;line-height:1;
+    letter-spacing:.06em;color:#e8fbff;background:#0a2436;border:2px solid #7fd0ff;padding:.35rem .45rem .3rem;
+    box-shadow:2px 2px 0 #000;white-space:nowrap;z-index:4;animation:blocked-pop .6s steps(6,end) forwards}
+  /* `top` dobrany do wysokości głowy: byk stoi wyżej niż rowerowy stwór, a nad
+     stworem, na wysokości byka, leży przycisk „Sound off" z paska areny. */
+  .fighter.a .pop.blocked{top:-.2rem;
+    left:calc(50% + (var(--fighter-scale) - 1) * -3.17rem - var(--fighter-spread))}
+  .fighter.b .pop.blocked{top:2.2rem;
+    left:calc(50% + (var(--fighter-scale) - 1) * 4.56rem + var(--fighter-spread))}
+  @keyframes blocked-pop{
+    0%{opacity:0;transform:translate(-50%,4px)}
+    17%{opacity:1;transform:translate(-50%,0)}
+    75%{opacity:1;transform:translate(-50%,-2px)}
+    100%{opacity:0;transform:translate(-50%,-4px)}}
   .flash{position:absolute;inset:0;background:var(--gold);opacity:0;pointer-events:none;z-index:2}
   .flash.on{animation:flash .25s}
   @keyframes flash{0%{opacity:.3}100%{opacity:0}}
@@ -310,10 +339,10 @@
   @media (prefers-reduced-motion:reduce){
     .fighter,.hpbar i,.fighter .fig,.fighter .stance,.fighter .sway{transition:none}
     .fighter.step-forward,.fighter.step-back{transition:none}
-    .fighter.hit .fig,.fighter.punch .stance,.fighter.low-hp .sway,.flash.on,.pop,.kostamp b,.arena.shake{animation:none}
+    .fighter.hit .fig,.fighter.punch .stance,.fighter.low-hp .sway,.flash.on,.pop,.pop.blocked,.kostamp b,.arena.shake{animation:none}
     /* Reguły niebieskiego mają wyższą specyficzność niż powyższe, więc bez tego
        przy `prefers-reduced-motion` wykrok i odskok grałyby dalej. */
-    .fighter.b.hit .fig,.fighter.b.punch .stance{animation:none}
+    .fighter.b.hit .fig,.fighter.b.punch .stance,.fighter.a.brace .stance,.fighter.b.brace .stance{animation:none}
   }
 
   /* ---------- pływające karty (tale of the tape / ringside read) ---------- */

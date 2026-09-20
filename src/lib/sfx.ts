@@ -2,57 +2,39 @@
  * Zarządzanie odtwarzaniem efektów dźwiękowych walki.
  * Domyślnie wyciszone, z możliwością włączenia przez użytkownika.
  *
- * Gong i cios syntezowane w Web Audio API.
- * Odliczanie i nokaut odtwarzane z plików TTS.
+ * Gong, cios i gwar trybun przy nokdaunie syntezowane w Web Audio API.
+ * Nokaut odtwarzany z pliku TTS.
  */
 
-export type SFXType =
-  | 'gong'
-  | 'punch'
-  | 'count-1'
-  | 'count-2'
-  | 'count-3'
-  | 'count-4'
-  | 'count-5'
-  | 'count-6'
-  | 'count-7'
-  | 'count-8'
-  | 'count-9'
-  | 'count-10'
-  | 'knockout';
+export type SFXType = 'gong' | 'punch' | 'knockout';
+
+/** Uchwyt na trwający gwar trybun — wywołujący decyduje, jak się kończy. */
+export interface CrowdSwellHandle {
+  /** Kończy gwar: `true` = wybuch (nokaut), `false` = opadnięcie (zawodnik wstaje). */
+  end(knockout: boolean): void;
+}
 
 interface SFXPlayer {
   play(type: SFXType): Promise<void>;
+  /** Startuje syntetyczny gwar trybun, narastający przez `riseMs`. */
+  startCrowdSwell(riseMs: number): CrowdSwellHandle;
   setMuted(muted: boolean): void;
   isMuted(): boolean;
 }
 
+const NOOP_SWELL: CrowdSwellHandle = { end: () => {} };
+
 class BrowserSFXPlayer implements SFXPlayer {
   private audioCache = new Map<SFXType, HTMLAudioElement>();
   private audioContext: AudioContext | null = null;
+  private pinkNoiseBuffer: AudioBuffer | null = null;
   private muted = true; // domyślnie wyciszone
 
   constructor() {
-    // Preload plików TTS (tylko odliczanie i nokaut)
-    const ttsFiles: SFXType[] = [
-      'count-1',
-      'count-2',
-      'count-3',
-      'count-4',
-      'count-5',
-      'count-6',
-      'count-7',
-      'count-8',
-      'count-9',
-      'count-10',
-      'knockout',
-    ];
-
-    for (const sound of ttsFiles) {
-      const audio = new Audio(`/sfx/${sound}.mp3`);
-      audio.preload = 'auto';
-      this.audioCache.set(sound, audio);
-    }
+    // Preload pliku TTS (tylko nokaut)
+    const audio = new Audio(`/sfx/knockout.mp3`);
+    audio.preload = 'auto';
+    this.audioCache.set('knockout', audio);
 
     // Wczytaj ustawienie z localStorage
     const saved = localStorage.getItem('sfx-muted');
@@ -66,6 +48,37 @@ class BrowserSFXPlayer implements SFXPlayer {
       this.audioContext = new AudioContext();
     }
     return this.audioContext;
+  }
+
+  /**
+   * Różowy szum (filtr 1/f metodą Paula Kelleta), zapętlony bufor 4s —
+   * wystarczy na najdłuższe odliczanie (nokaut, countTo 10).
+   */
+  private getPinkNoiseBuffer(): AudioBuffer {
+    if (this.pinkNoiseBuffer) return this.pinkNoiseBuffer;
+
+    const ctx = this.getAudioContext();
+    const duration = 4;
+    const length = Math.floor(ctx.sampleRate * duration);
+    const buffer = ctx.createBuffer(1, length, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+
+    let b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+    for (let i = 0; i < length; i++) {
+      const white = Math.random() * 2 - 1;
+      b0 = 0.99886 * b0 + white * 0.0555179;
+      b1 = 0.99332 * b1 + white * 0.0750759;
+      b2 = 0.96900 * b2 + white * 0.1538520;
+      b3 = 0.86650 * b3 + white * 0.3104856;
+      b4 = 0.55000 * b4 + white * 0.5329522;
+      b5 = -0.7616 * b5 - white * 0.0168980;
+      const pink = b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362;
+      b6 = white * 0.115926;
+      data[i] = pink * 0.11;
+    }
+
+    this.pinkNoiseBuffer = buffer;
+    return buffer;
   }
 
   /**
@@ -200,6 +213,89 @@ class BrowserSFXPlayer implements SFXPlayer {
     noise.stop(now + duration);
   }
 
+  /**
+   * Gwar trybun przy nokdaunie: filtrowany różowy szum (bandpass ~300-2000 Hz)
+   * przez kilka wolnych LFO dla falowania głośności, narastający przez `riseMs`.
+   * Wywołujący kończy go przez `end(knockout)`: opadnięcie, gdy zawodnik wstaje,
+   * albo krótki wybuch głośności, gdy to nokaut.
+   */
+  startCrowdSwell(riseMs: number): CrowdSwellHandle {
+    if (this.muted || riseMs <= 0) return NOOP_SWELL;
+
+    const ctx = this.getAudioContext();
+    const now = ctx.currentTime;
+    const riseSec = Math.max(0.05, riseMs / 1000);
+
+    const noise = ctx.createBufferSource();
+    noise.buffer = this.getPinkNoiseBuffer();
+    noise.loop = true;
+
+    // Pasmo ~300-2000 Hz (środek geometryczny ≈ 775 Hz)
+    const bandpass = ctx.createBiquadFilter();
+    bandpass.type = 'bandpass';
+    bandpass.frequency.setValueAtTime(775, now);
+    bandpass.Q.setValueAtTime(0.55, now);
+
+    // Falowanie głośności: kilka wolnych LFO sumowanych na jednym AudioParam
+    const wobble = ctx.createGain();
+    wobble.gain.setValueAtTime(1, now);
+    const lfoConfig = [
+      { freq: 0.17, depth: 0.12 },
+      { freq: 0.31, depth: 0.08 },
+      { freq: 0.53, depth: 0.05 },
+    ];
+    const lfoNodes = lfoConfig.map(({ freq, depth }) => {
+      const lfo = ctx.createOscillator();
+      lfo.frequency.setValueAtTime(freq, now);
+      const depthGain = ctx.createGain();
+      depthGain.gain.setValueAtTime(depth, now);
+      lfo.connect(depthGain);
+      depthGain.connect(wobble.gain);
+      lfo.start(now);
+      return lfo;
+    });
+
+    // Narastanie gwaru przez cały czas liczenia
+    const swell = ctx.createGain();
+    swell.gain.setValueAtTime(0.0001, now);
+    swell.gain.exponentialRampToValueAtTime(0.02, now + Math.min(0.15, riseSec * 0.3));
+    swell.gain.linearRampToValueAtTime(0.18, now + riseSec);
+
+    noise.connect(bandpass);
+    bandpass.connect(wobble);
+    wobble.connect(swell);
+    swell.connect(ctx.destination);
+    noise.start(now);
+
+    let ended = false;
+    const stop = (at: number) => {
+      noise.stop(at);
+      lfoNodes.forEach((lfo) => lfo.stop(at));
+    };
+
+    return {
+      end: (knockout: boolean) => {
+        if (ended) return;
+        ended = true;
+
+        const endNow = ctx.currentTime;
+        swell.gain.cancelScheduledValues(endNow);
+        swell.gain.setValueAtTime(swell.gain.value, endNow);
+
+        if (knockout) {
+          // Krótki wybuch głośności — ryk tłumu
+          swell.gain.linearRampToValueAtTime(0.5, endNow + 0.15);
+          swell.gain.exponentialRampToValueAtTime(0.001, endNow + 0.5);
+          stop(endNow + 0.55);
+        } else {
+          // Opadnięcie, gdy zawodnik wstaje
+          swell.gain.exponentialRampToValueAtTime(0.001, endNow + 0.4);
+          stop(endNow + 0.45);
+        }
+      },
+    };
+  }
+
   async play(type: SFXType): Promise<void> {
     if (this.muted) return;
 
@@ -214,7 +310,7 @@ class BrowserSFXPlayer implements SFXPlayer {
         return;
       }
 
-      // Pliki TTS (odliczanie i nokaut)
+      // Plik TTS (nokaut)
       const audio = this.audioCache.get(type);
       if (!audio) return;
 
@@ -244,6 +340,7 @@ export function getSFXPlayer(): SFXPlayer {
     // SSR fallback
     return {
       play: async () => {},
+      startCrowdSwell: () => NOOP_SWELL,
       setMuted: () => {},
       isMuted: () => true,
     };
@@ -254,18 +351,4 @@ export function getSFXPlayer(): SFXPlayer {
   }
 
   return instance;
-}
-
-/**
- * Wygodny helper do odliczania 1..10 z opóźnieniem między liczbami.
- * @param delayMs opóźnienie między kolejnymi liczbami
- */
-export async function playCountdown(delayMs = 800): Promise<void> {
-  const player = getSFXPlayer();
-  for (let i = 1; i <= 10; i++) {
-    await player.play(`count-${i}` as SFXType);
-    if (i < 10) {
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-    }
-  }
 }

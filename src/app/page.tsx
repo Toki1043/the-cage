@@ -33,7 +33,7 @@ import { drawReferee } from '@/lib/referee-svg'
 import { HallBanners } from './hall-banners'
 import { modelsLabel } from '@/lib/orbio-stack'
 import { VOICE_NAMES, type CommentaryVoice } from '@/lib/commentary-voices'
-import { getSFXPlayer, type SFXType } from '@/lib/sfx'
+import { getSFXPlayer } from '@/lib/sfx'
 import {
   INSTRUCTIONS,
   fightCancelledCall,
@@ -587,6 +587,21 @@ function createRing(data: FightApiResponse, clock: Clock) {
     setTimeout(() => span.remove(), 1100)
   }
 
+  /**
+   * Podpis przy obronie nieprzepuszczonego ciosu. Jeden naraz na zawodnika:
+   * serie chybień przychodzą co ~0,4 s, a podpis żyje dłużej, więc bez zdjęcia
+   * poprzedniego piętrzyłyby się w jednym miejscu.
+   */
+  function blockedTag(side: Side) {
+    const host = need(`f-${side}`)
+    host.querySelector('.pop.blocked')?.remove()
+    const span = document.createElement('span')
+    span.className = 'pop blocked'
+    span.textContent = 'BLOCKED'
+    host.appendChild(span)
+    setTimeout(() => span.remove(), 600)
+  }
+
   function flash() {
     const node = need('flash')
     node.classList.remove('on')
@@ -617,20 +632,26 @@ function createRing(data: FightApiResponse, clock: Clock) {
     setTimeout(() => arena.classList.remove('shake'), 450)
   }
 
-  /** Odliczanie: 1 … 2 … 3, dopisywane do kwestii sędziego. */
+  /**
+   * Odliczanie: 1 … 2 … 3, dopisywane do kwestii sędziego.
+   *
+   * Gwar trybun narasta przez cały czas liczenia. `to === 10` to zawsze
+   * finalny nokaut (fight.ts § FightEvent) — gwar kończy się wybuchem;
+   * przy knockdownie (to === 8, zawodnik wstaje) gwar opada.
+   */
   async function countTo(to: number, lead: string, step: number) {
     const ref = need('ref-fig')
     const sfx = getSFXPlayer()
     ref.classList.add('counting')
     const spoken: number[] = []
+    const swell = sfx.startCrowdSwell(clock.skip ? 0 : to * step)
     for (let n = 1; n <= to; n++) {
       spoken.push(n)
       setRef(`${lead} ${spoken.join(' … ')}`)
-      // Odtwórz dźwięk odliczania
-      void sfx.play(`count-${n}` as SFXType)
       await sleep(step)
     }
     ref.classList.remove('counting')
+    swell.end(to === 10)
   }
 
   async function throwPunch(event: Extract<FightResult['events'][number], { type: 'punch' }>) {
@@ -645,12 +666,17 @@ function createRing(data: FightApiResponse, clock: Clock) {
 
     if (!event.landed) {
       await sleep(TIMING.missWindup)
+      // Cios dochodzi do celu i nie przechodzi: obrońca dostaje podpis i
+      // odchyla się do tyłu (`.brace`, patrz globals.css).
+      defender.classList.add('brace')
+      blockedTag(defenderSide)
       attacker.classList.remove('punch')
       attacker.classList.add('step-back')
       attacker.classList.remove('step-forward')
       await sleep(TIMING.stepBack)
       attacker.classList.remove('step-back')
       await sleep(TIMING.missRecover)
+      defender.classList.remove('brace')
       return
     }
 
@@ -693,7 +719,7 @@ function createRing(data: FightApiResponse, clock: Clock) {
     for (const side of ['a', 'b'] as const) {
       const token = side === 'a' ? data.tokenA : data.tokenB
       const host = need(`f-${side}`)
-      host.classList.remove('down', 'punch', 'hit')
+      host.classList.remove('down', 'punch', 'hit', 'brace')
       host.innerHTML = drawFighter(
         {
           symbol: symbols[side],
